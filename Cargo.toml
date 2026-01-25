@@ -1,0 +1,111 @@
+[package]
+name = "igrisv3"
+version = "0.1.0"
+edition = "2021"
+authors = ["sohan patil <sohanpatil965@gmail.com>"]
+build = "build.rs"
+
+
+[dependencies]
+# Dioxus
+dioxus = { version = "0.7", features = ["desktop"] }
+dioxus-desktop = "0.7"
+
+# Speech & Audio
+whisper-rs = "0.11.0"
+cpal = "0.16"
+rodio = "0.17"
+manganis="0.7.0"
+# System
+tokio = { version = "1", features = ["full"] }
+chrono = { version = "0.4", features = ["serde"] }
+lazy_static = "1.4"
+once_cell = "1.19"
+async-std = "1.12"
+
+# Utils
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+num_cpus = "1.16"
+image = { version = "0.24", features = ["jpeg", "png"] }
+dirs = "5.0"
+
+# NLU Dependencies
+anyhow = "1.0"
+regex = "1.10"
+urlencoding = "2.1"
+fuzzy-matcher = "0.3"
+
+# FFT for noise cancellation
+rustfft = "6.1"
+num-complex = "0.4"
+
+# Network & Device Discovery
+tokio-rustls = "0.26"
+rustls = { version = "0.23", features = ["ring"] }
+rustls-pemfile = "2"
+socket2 = { version = "0.5", features = ["all"] }
+sha2 = "0.10"
+rand = "0.8"
+rcgen = "0.13"
+uuid = { version = "1.0", features = ["v4"] }
+base64 = "0.22"
+hostname = "0.4"
+get_if_addrs = "0.5"
+
+
+# New dependencies for setup system
+reqwest = { version = "0.11", features = ["stream", "blocking"] }
+futures = "0.3"
+zip = "0.6"
+scraper = "0.20"
+
+# Fix indicatif compatibility
+indicatif = "0.17"
+console = { version = "0.16", features = ["std"] }
+
+[dev-dependencies]
+tempfile = "3.8"
+
+[build-dependencies]
+embed-resource = "1.8"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[lib]
+name = "igrisv3"
+path = "src/lib.rs"
+
+[[bin]]
+name = "igrisv3"
+path = "src/main.rs"
+
+# Asset embedding
+[package.metadata.dioxus]
+web = { assets = "assets" }
+
+# Desktop icon configuration
+[package.metadata.dioxus.desktop]
+icon = "icons/icon.ico"
+
+# Windows executable icon
+[package.metadata.winresource]
+icon = "icons/icon.ico"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["processthreadsapi", "winnt", "winuser"] }
+windows = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_Media_MediaFoundation",
+    "Win32_Graphics_Imaging",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Threading",
+] }
