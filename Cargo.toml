@@ -66,6 +66,9 @@ console = { version = "0.16", features = ["std"] }
 
 [dev-dependencies]
 tempfile = "3.8"
+proptest = "1.4"
+quickcheck = "1.0"
+quickcheck_macros = "1.0"
 
 [build-dependencies]
 embed-resource = "1.8"
