@@ -227,3 +227,56 @@ mod tests {
         assert_ne!(ConnectionType::NewConnection, ConnectionType::AlreadyTrusted);
     }
 }
+
+// Property tests for ConnectionError
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // Property 18: Error Message Propagation
+    // All ConnectionError variants must have non-empty user messages
+    proptest! {
+        #[test]
+        fn prop_error_messages_non_empty(remaining_secs in 0u64..3600) {
+            let errors = vec![
+                ConnectionError::CodeNotFound,
+                ConnectionError::CodeExpired,
+                ConnectionError::NetworkError("test".to_string()),
+                ConnectionError::AlreadyTrusted,
+                ConnectionError::RateLimited { remaining_secs },
+                ConnectionError::TrustFailed("test".to_string()),
+                ConnectionError::InvalidCode,
+            ];
+            
+            for error in errors {
+                let msg = error.user_message();
+                prop_assert!(!msg.is_empty(), "Error message should not be empty");
+                prop_assert!(msg.len() > 10, "Error message should be descriptive");
+            }
+        }
+
+        #[test]
+        fn prop_rate_limit_message_format(remaining_secs in 1u64..7200) {
+            let error = ConnectionError::RateLimited { remaining_secs };
+            let msg = error.user_message();
+            
+            prop_assert!(msg.contains("Too many failed attempts"));
+            
+            if remaining_secs >= 60 {
+                prop_assert!(msg.contains("minutes"));
+            } else {
+                prop_assert!(msg.contains("seconds"));
+            }
+        }
+
+        #[test]
+        fn prop_error_display_matches_user_message(remaining_secs in 0u64..3600) {
+            let error = ConnectionError::RateLimited { remaining_secs };
+            let display_msg = format!("{}", error);
+            let user_msg = error.user_message();
+            
+            prop_assert_eq!(display_msg, user_msg);
+        }
+    }
+}

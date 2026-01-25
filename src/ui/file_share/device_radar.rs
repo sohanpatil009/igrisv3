@@ -13,6 +13,7 @@ pub struct DeviceDisplay {
     pub ip: String,
     pub is_trusted: bool,
     pub is_online: bool,
+    pub code: Option<String>, // Pairing code from discovery
 }
 
 /// Connection status for UI feedback
@@ -110,7 +111,7 @@ pub fn DeviceRadar(
     rsx! {
         div {
             class: "device-radar-container",
-            style: "background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border-radius: 16px; padding: 24px; min-width: 450px; max-width: 500px;",
+            style: "background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border-radius: 16px; padding: 24px; min-width: 450px; max-width: min(800px, 90vw); width: min(600px, 85vw); max-height: 90vh; overflow-y: auto; overflow-x: hidden;",
             
             // Header with close button
             div {
@@ -182,7 +183,7 @@ pub fn DeviceRadar(
             
             // Radar visualization
             div {
-                style: "position: relative; width: 300px; height: 300px; margin: 0 auto 20px; background: radial-gradient(circle, #0f172a 0%, #1e293b 100%); border-radius: 50%; border: 2px solid #334155;",
+                style: "position: relative; width: min(300px, 100%); height: min(300px, 100%); aspect-ratio: 1; margin: 0 auto 20px; background: radial-gradient(circle, #0f172a 0%, #1e293b 100%); border-radius: 50%; border: 2px solid #334155;",
                 
                 // Radar rings
                 div { style: "position: absolute; top: 25%; left: 25%; width: 50%; height: 50%; border: 1px solid #334155; border-radius: 50%;" }
@@ -243,6 +244,7 @@ pub fn DeviceRadar(
                         {
                             let device_id = device.id.clone();
                             let device_id2 = device.id.clone();
+                            let device_code = device.code.clone();
                             let is_selected = selected_device() == Some(device.id.clone());
                             let bg = if is_selected { "#334155" } else { "#1e293b" };
                             
@@ -257,7 +259,13 @@ pub fn DeviceRadar(
                                         span { style: "font-size: 24px;", "{device.os_icon}" }
                                         div {
                                             div { style: "color: #fff; font-weight: 500;", "{device.label}" }
-                                            div { style: "color: #64748b; font-size: 12px;", "{device.os} • {device.ip}" }
+                                            div { 
+                                                style: "color: #64748b; font-size: 12px;", 
+                                                "{device.os} • {device.ip}"
+                                                if let Some(code) = &device_code {
+                                                    " • Code: {code}"
+                                                }
+                                            }
                                         }
                                     }
                                     
@@ -265,7 +273,28 @@ pub fn DeviceRadar(
                                         style: "display: flex; align-items: center; gap: 8px;",
                                         if device.is_trusted {
                                             span { style: "color: #4ade80; font-size: 12px;", "✓ Connected" }
+                                        } else if let Some(ref code) = device_code {
+                                            // Show code with "Use Code" button
+                                            div {
+                                                style: "display: flex; flex-direction: column; align-items: flex-end; gap: 4px;",
+                                                div {
+                                                    style: "background: #3b82f6; color: white; padding: 4px 12px; border-radius: 6px; font-size: 14px; font-weight: bold; letter-spacing: 2px;",
+                                                    "{code}"
+                                                }
+                                                button {
+                                                    style: "background: #10b981; color: white; border: none; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 11px;",
+                                                    onclick: {
+                                                        let code_val = code.clone();
+                                                        move |e| {
+                                                            e.stop_propagation();
+                                                            input_code.set(code_val.clone());
+                                                        }
+                                                    },
+                                                    "Use Code"
+                                                }
+                                            }
                                         } else {
+                                            // No code available, show connect button
                                             button {
                                                 style: "background: #3b82f6; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;",
                                                 onclick: move |e| {

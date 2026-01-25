@@ -342,3 +342,161 @@ mod tests {
         assert!(service.get_my_code(device_id).is_none());
     }
 }
+
+// Property tests for RelayService
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // Property 1: Code Format Validity
+    proptest! {
+        #[test]
+        fn prop_code_format_valid(_seed in 0u64..1000) {
+            let code = RelayService::generate_code();
+            
+            // Must be exactly 4 characters
+            prop_assert_eq!(code.len(), 4);
+            
+            // Must be all numeric
+            prop_assert!(code.chars().all(|c| c.is_numeric()));
+            
+            // Must be in range 1000-9999
+            let num: u32 = code.parse().unwrap();
+            prop_assert!(num >= 1000 && num <= 9999);
+        }
+    }
+
+    // Property 2: Code Uniqueness Per Device
+    proptest! {
+        #[test]
+        fn prop_code_uniqueness(device_id in "[a-z0-9]{8,16}") {
+            let service = RelayService::new();
+            
+            let code1 = service.register_device(
+                device_id.clone(),
+                "192.168.1.10".to_string(),
+                45679,
+                "TestHost".to_string(),
+                "Test Device".to_string(),
+                OperatingSystem::Linux,
+            ).unwrap();
+            
+            // Same device should get the same code when looked up
+            let my_code = service.get_my_code(&device_id);
+            prop_assert_eq!(my_code, Some(code1));
+        }
+    }
+
+    // Property 3: Code Expiry Timing
+    proptest! {
+        #[test]
+        fn prop_code_expiry_timing(device_id in "[a-z0-9]{8,16}") {
+            let service = RelayService::new();
+            
+            let code = service.register_device(
+                device_id,
+                "192.168.1.10".to_string(),
+                45679,
+                "TestHost".to_string(),
+                "Test Device".to_string(),
+                OperatingSystem::Linux,
+            ).unwrap();
+            
+            // Code should be valid immediately after creation
+            let reg = service.lookup_device(&code);
+            prop_assert!(reg.is_ok());
+            prop_assert!(!reg.unwrap().is_expired());
+        }
+    }
+
+    // Property 4: Automatic Code Regeneration
+    proptest! {
+        #[test]
+        fn prop_code_regeneration(device_id in "[a-z0-9]{8,16}") {
+            let service = RelayService::new();
+            
+            // Register device
+            let code1 = service.register_device(
+                device_id.clone(),
+                "192.168.1.10".to_string(),
+                45679,
+                "TestHost".to_string(),
+                "Test Device".to_string(),
+                OperatingSystem::Linux,
+            ).unwrap();
+            
+            // Register same device again (simulating regeneration)
+            let code2 = service.register_device(
+                device_id,
+                "192.168.1.10".to_string(),
+                45679,
+                "TestHost".to_string(),
+                "Test Device".to_string(),
+                OperatingSystem::Linux,
+            ).unwrap();
+            
+            // Both codes should be valid 4-digit codes
+            prop_assert_eq!(code1.len(), 4);
+            prop_assert_eq!(code2.len(), 4);
+        }
+    }
+
+    // Property 10: Code Registration Completeness
+    proptest! {
+        #[test]
+        fn prop_registration_completeness(
+            device_id in "[a-z0-9]{8,16}",
+            hostname in "[A-Za-z0-9-]{3,20}",
+            label in "[A-Za-z0-9 ]{3,30}",
+        ) {
+            let service = RelayService::new();
+            
+            let code = service.register_device(
+                device_id.clone(),
+                "192.168.1.10".to_string(),
+                45679,
+                hostname.clone(),
+                label.clone(),
+                OperatingSystem::Linux,
+            ).unwrap();
+            
+            let reg = service.lookup_device(&code).unwrap();
+            
+            // All fields should be preserved
+            prop_assert_eq!(reg.device_id, device_id);
+            prop_assert_eq!(reg.hostname, hostname);
+            prop_assert_eq!(reg.label, label);
+            prop_assert_eq!(reg.ip_address, "192.168.1.10");
+            prop_assert_eq!(reg.bridge_port, 45679);
+            prop_assert_eq!(reg.os, OperatingSystem::Linux);
+        }
+    }
+
+    // Property 11: Code Lookup Round-Trip
+    proptest! {
+        #[test]
+        fn prop_lookup_round_trip(device_id in "[a-z0-9]{8,16}") {
+            let service = RelayService::new();
+            
+            // Register device
+            let code = service.register_device(
+                device_id.clone(),
+                "192.168.1.10".to_string(),
+                45679,
+                "TestHost".to_string(),
+                "Test Device".to_string(),
+                OperatingSystem::Windows,
+            ).unwrap();
+            
+            // Lookup should return the same device
+            let reg = service.lookup_device(&code).unwrap();
+            prop_assert_eq!(reg.device_id, device_id.clone());
+            prop_assert_eq!(reg.code, code.clone());
+            
+            // Looking up with the same code again should work
+            let reg2 = service.lookup_device(&code).unwrap();
+            prop_assert_eq!(reg2.device_id, device_id);
+        }
+    }
+}

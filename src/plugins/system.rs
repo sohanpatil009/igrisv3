@@ -181,12 +181,8 @@ impl PluginManager {
             self.plugins.insert(plugin.metadata.name.clone(), plugin);
         }
         
-        // Create plugins directory if it doesn't exist (for custom JSON plugins)
-        if !self.plugins_dir.exists() {
-            std::fs::create_dir_all(&self.plugins_dir)?;
-        }
-
         // Load custom JSON plugins (user-defined, can override built-in)
+        // Only load if plugins directory already exists
         self.load_all_plugins()?;
         
         Ok(())

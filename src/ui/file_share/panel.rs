@@ -71,31 +71,26 @@ pub fn FileSharePanel(
     let on_connect = move |device_id: String| {
         let device = devices().iter().find(|d| d.id == device_id).cloned();
         if let Some(d) = device {
-            if d.is_trusted {
+            // Use device's code for connection (from discovery broadcast)
+            if let Some(code) = d.code {
+                println!("[FileShare] Connecting to {} using code: {}", d.label, code);
                 spawn(async move {
-                    match connect_to_device_async(&device_id).await {
-                        Ok(_) => println!("[FileShare] Connected to {}", device_id),
-                        Err(e) => error_message.set(Some(e)),
+                    match connect_via_code_async(&code).await {
+                        Ok(result) => {
+                            println!("[FileShare] Connected to {}", result.device_label);
+                        },
+                        Err(e) => {
+                            println!("[FileShare] Connection error: {}", e);
+                            error_message.set(Some(format!("Connection failed: {}", e)));
+                        }
                     }
                 });
             } else {
-                // NOTE: Pairing code generation is deprecated and will be replaced by ConnectionCoordinator
-                // in task 6. For now, this functionality is disabled.
-                error_message.set(Some("Pairing code generation temporarily disabled. Will be replaced by unified connection system.".to_string()));
-                
-                /* DEPRECATED CODE - Will be replaced in task 6
-                panel_state.set(FileSharePanelState::Pairing {
-                    device_id: d.id.clone(),
-                    device_label: d.label.clone(),
-                });
-                let did = d.id.clone();
-                spawn(async move {
-                    match generate_pairing_code_async(&did).await {
-                        Ok(code) => pairing_code.set(Some(code)),
-                        Err(e) => error_message.set(Some(e)),
-                    }
-                });
-                */
+                // No code available - ask user to enter manually
+                error_message.set(Some(format!(
+                    "Device {} doesn't have a code. Please ask them to share their 4-digit code and enter it manually.",
+                    d.label
+                )));
             }
         }
     };
@@ -396,6 +391,7 @@ async fn refresh_data(
                 ip: d.ip_address.to_string(),
                 is_trusted,
                 is_online: d.is_online(),
+                code: d.code.clone(), // Include the broadcasted code
             }
         }).collect();
         devices.set(display);
@@ -508,4 +504,64 @@ async fn send_file_async(device_id: &str, file_path: &str) -> Result<(), String>
     let path = std::path::Path::new(file_path);
     crate::file_share::transfer::send_file(device_id, path)?;
     Ok(())
+}
+
+/// Result of a code connection
+struct CodeConnectionResult {
+    device_label: String,
+}
+
+/// Connect to a device using their 4-digit code via ConnectionCoordinator
+async fn connect_via_code_async(code: &str) -> Result<CodeConnectionResult, String> {
+    use std::sync::Arc;
+    
+    // Get the connection coordinator
+    let coordinator = get_connection_coordinator()
+        .map_err(|e| format!("Failed to get coordinator: {}", e))?;
+    
+    // Connect using the code
+    let result = coordinator.connect_with_code(code).await
+        .map_err(|e| e.user_message())?;
+    
+    println!("[FileShare] Connected via code to: {} (type: {:?})", 
+        result.device.label, result.connection_type);
+    
+    Ok(CodeConnectionResult {
+        device_label: result.device.label,
+    })
+}
+
+/// Get or create the ConnectionCoordinator instance
+fn get_connection_coordinator() -> Result<std::sync::Arc<crate::file_share::connection::ConnectionCoordinator>, String> {
+    use std::sync::Mutex;
+    use lazy_static::lazy_static;
+    
+    lazy_static! {
+        static ref COORDINATOR: Mutex<Option<std::sync::Arc<crate::file_share::connection::ConnectionCoordinator>>> = Mutex::new(None);
+    }
+    
+    let mut coord_lock = COORDINATOR.lock()
+        .map_err(|e| format!("Lock error: {}", e))?;
+    
+    if let Some(ref coordinator) = *coord_lock {
+        return Ok(std::sync::Arc::clone(coordinator));
+    }
+    
+    // Create new coordinator
+    let relay = std::sync::Arc::new(crate::file_share::relay::RelayService::new());
+    
+    let trust = std::sync::Arc::new(Mutex::new(crate::file_share::trust::TrustManager::new()));
+    
+    // Discovery service is optional - will be initialized by the main file share system
+    let discovery = std::sync::Arc::new(Mutex::new(None));
+    
+    let coordinator = std::sync::Arc::new(crate::file_share::connection::ConnectionCoordinator::new(
+        relay,
+        trust,
+        discovery,
+    ));
+    
+    *coord_lock = Some(std::sync::Arc::clone(&coordinator));
+    
+    Ok(coordinator)
 }

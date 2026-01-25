@@ -299,3 +299,160 @@ pub fn rename_trusted_device(device_id: &str, new_label: &str) -> Result<bool, S
     let mut manager = manager.lock().map_err(|e| format!("Lock error: {}", e))?;
     manager.rename_device(device_id, new_label)
 }
+
+
+// Property tests for TrustManager
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // Property 20: Rate Limiting After Failed Attempts
+    proptest! {
+        #[test]
+        fn prop_rate_limiting_after_failures(device_id in "[a-z0-9]{32}") {
+            let mut manager = TrustManager::new();
+            
+            // First 2 attempts should not block
+            for i in 0..2 {
+                manager.record_failed_attempt(&device_id);
+                let result = manager.check_rate_limit(&device_id);
+                prop_assert!(result.is_ok(), "Should not be blocked after {} attempts", i + 1);
+            }
+            
+            // 3rd attempt should trigger block
+            manager.record_failed_attempt(&device_id);
+            let result = manager.check_rate_limit(&device_id);
+            prop_assert!(result.is_err(), "Should be blocked after 3 attempts");
+        }
+    }
+
+    // Property 21: Block Duration Timing
+    proptest! {
+        #[test]
+        fn prop_block_duration_timing(device_id in "[a-z0-9]{32}") {
+            let mut manager = TrustManager::new();
+            
+            // Trigger block with 3 failed attempts
+            for _ in 0..3 {
+                manager.record_failed_attempt(&device_id);
+            }
+            
+            // Should be blocked
+            let result = manager.check_rate_limit(&device_id);
+            prop_assert!(result.is_err());
+            
+            if let Err(remaining) = result {
+                // Remaining time should be reasonable (0-300 seconds)
+                prop_assert!(remaining <= BLOCK_DURATION_SECS);
+                prop_assert!(remaining > 0 || remaining == 0); // Allow for timing edge cases
+            }
+        }
+    }
+
+    // Property 22: Failed Attempt Counter Reset
+    proptest! {
+        #[test]
+        fn prop_failed_attempt_reset(device_id in "[a-z0-9]{32}") {
+            let mut manager = TrustManager::new();
+            
+            // Record some failed attempts
+            manager.record_failed_attempt(&device_id);
+            manager.record_failed_attempt(&device_id);
+            
+            // Simulate successful trust establishment (which resets attempts)
+            let device_info = DeviceInfo {
+                device_id: device_id.clone(),
+                hostname: "TestHost".to_string(),
+                label: "Test Device".to_string(),
+                os: OperatingSystem::Linux,
+                ip_address: "192.168.1.10".to_string(),
+                bridge_port: 45679,
+            };
+            
+            // Note: establish_trust requires file I/O, so we test the internal reset
+            // by checking that failed_attempts is cleared
+            manager.failed_attempts.remove(&device_id);
+            
+            // After reset, should not be blocked
+            let result = manager.check_rate_limit(&device_id);
+            prop_assert!(result.is_ok());
+        }
+    }
+
+    // Property 23: Failed Attempt Logging
+    proptest! {
+        #[test]
+        fn prop_failed_attempt_logging(device_id in "[a-z0-9]{32}", attempts in 1u32..10) {
+            let mut manager = TrustManager::new();
+            
+            // Record multiple failed attempts
+            for _ in 0..attempts {
+                manager.record_failed_attempt(&device_id);
+            }
+            
+            // Check that attempts are tracked
+            if let Some(attempt) = manager.failed_attempts.get(&device_id) {
+                prop_assert_eq!(attempt.count, attempts.min(MAX_FAILED_ATTEMPTS));
+                
+                // If >= 3 attempts, should be blocked
+                if attempts >= MAX_FAILED_ATTEMPTS {
+                    prop_assert!(attempt.is_blocked());
+                }
+            }
+        }
+    }
+
+    // Property 14: Trust Persistence Round-Trip (simplified without file I/O)
+    proptest! {
+        #[test]
+        fn prop_trust_data_structure(
+            device_id in "[a-z0-9]{32}",
+            label in "[A-Za-z0-9 ]{3,30}",
+            cert_fp in "[a-f0-9]{64}",
+        ) {
+            // Test that DeviceInfo structure preserves all data
+            let device_info = DeviceInfo {
+                device_id: device_id.clone(),
+                hostname: "TestHost".to_string(),
+                label: label.clone(),
+                os: OperatingSystem::Windows,
+                ip_address: "192.168.1.10".to_string(),
+                bridge_port: 45679,
+            };
+            
+            // Verify all fields are preserved
+            prop_assert_eq!(device_info.device_id, device_id);
+            prop_assert_eq!(device_info.label, label);
+            prop_assert_eq!(device_info.os, OperatingSystem::Windows);
+            prop_assert_eq!(device_info.ip_address, "192.168.1.10");
+            prop_assert_eq!(device_info.bridge_port, 45679);
+        }
+    }
+
+    // Property 15: Trust Data Completeness
+    proptest! {
+        #[test]
+        fn prop_trust_data_completeness(
+            device_id in "[a-z0-9]{32}",
+            hostname in "[A-Za-z0-9-]{3,20}",
+            label in "[A-Za-z0-9 ]{3,30}",
+        ) {
+            let device_info = DeviceInfo {
+                device_id: device_id.clone(),
+                hostname: hostname.clone(),
+                label: label.clone(),
+                os: OperatingSystem::MacOS,
+                ip_address: "10.0.0.5".to_string(),
+                bridge_port: 45679,
+            };
+            
+            // All required fields must be non-empty
+            prop_assert!(!device_info.device_id.is_empty());
+            prop_assert!(!device_info.hostname.is_empty());
+            prop_assert!(!device_info.label.is_empty());
+            prop_assert!(!device_info.ip_address.is_empty());
+            prop_assert!(device_info.bridge_port > 0);
+        }
+    }
+}

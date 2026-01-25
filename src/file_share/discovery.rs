@@ -29,6 +29,7 @@ pub struct DiscoveryMessage {
     pub label: String,
     pub os: OperatingSystem,
     pub bridge_port: u16,
+    pub code: Option<String>, // 4-digit pairing code (optional)
 }
 
 impl DiscoveryMessage {
@@ -41,7 +42,13 @@ impl DiscoveryMessage {
             label: identity.label.clone(),
             os: identity.os.clone(),
             bridge_port,
+            code: None, // Code will be set separately
         }
+    }
+    
+    pub fn with_code(mut self, code: Option<String>) -> Self {
+        self.code = code;
+        self
     }
     
     pub fn is_valid(&self) -> bool {
@@ -68,6 +75,7 @@ pub struct DiscoveredDevice {
     pub bridge_port: u16,
     pub last_seen: Instant,
     pub is_trusted: bool,
+    pub code: Option<String>, // Pairing code broadcasted by the device
 }
 
 impl DiscoveredDevice {
@@ -219,6 +227,7 @@ impl DiscoveryService {
             bridge_port,
             last_seen: Instant::now(),
             is_trusted: false,
+            code: None, // Manual devices don't have codes initially
         };
         
         // Add to devices list
@@ -249,8 +258,6 @@ impl DiscoveryService {
 /// Broadcast our presence on the network
 async fn run_broadcaster(running: Arc<Mutex<bool>>) -> Result<(), String> {
     let config = load_config()?;
-    let message = DiscoveryMessage::new(&config.identity, config.bridge_port);
-    let message_bytes = message.to_bytes()?;
     
     // Create socket with proper multicast settings
     use socket2::{Domain, Protocol, Socket, Type};
@@ -291,6 +298,14 @@ async fn run_broadcaster(running: Arc<Mutex<bool>>) -> Result<(), String> {
                 break;
             }
         }
+        
+        // Get current code from relay service (if available)
+        let my_code = super::relay::get_my_device_code(&config.identity.id);
+        
+        // Create message with current code
+        let message = DiscoveryMessage::new(&config.identity, config.bridge_port)
+            .with_code(my_code);
+        let message_bytes = message.to_bytes()?;
         
         // Send discovery message
         match socket.send_to(&message_bytes, multicast_addr).await {
@@ -358,6 +373,7 @@ async fn run_listener(
                             bridge_port: message.bridge_port,
                             last_seen: Instant::now(),
                             is_trusted,
+                            code: message.code, // Store the broadcasted code
                         };
                         
                         // Update device list

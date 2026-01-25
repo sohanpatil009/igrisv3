@@ -232,6 +232,31 @@ async fn run_setup_and_assistant() {
                         "Setup completed successfully".to_string(),
                         LogLevel::Success,
                     ));
+                    
+                    // macOS Firewall Check after setup completion
+                    #[cfg(target_os = "macos")]
+                    {
+                        use platform::{check_and_prompt_firewall, show_firewall_help};
+                        
+                        println!("\n[Firewall] Checking macOS firewall configuration...");
+                        match check_and_prompt_firewall() {
+                            Ok(_) => {
+                                println!("[Firewall] ✅ Ready for file sharing");
+                                state.logs.push((
+                                    "Firewall configured for file sharing".to_string(),
+                                    LogLevel::Success,
+                                ));
+                            }
+                            Err(_) => {
+                                show_firewall_help();
+                                println!("[Firewall] ⚠️  File sharing may not work until firewall is configured");
+                                state.logs.push((
+                                    "Firewall setup required for file sharing".to_string(),
+                                    LogLevel::Warning,
+                                ));
+                            }
+                        }
+                    }
                 }
                 Err(e) => {
                     let mut state = ASSISTANT_STATE.lock().unwrap();
