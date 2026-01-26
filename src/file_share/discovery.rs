@@ -569,7 +569,15 @@ pub async fn start_discovery() -> Result<(), String> {
     let service_lock = get_discovery_service()?;
     let service = service_lock.lock().map_err(|e| format!("Lock error: {}", e))?;
     if let Some(ref svc) = *service {
-        svc.start().await
+        svc.start().await?;
+        
+        // Start bridge server to accept incoming connections
+        println!("[Discovery] Starting bridge server...");
+        let coordinator = super::connection::get_connection_coordinator()?;
+        super::bridge::start_bridge_server(coordinator).await?;
+        println!("[Discovery] Bridge server started");
+        
+        Ok(())
     } else {
         Err("Discovery service not initialized".to_string())
     }

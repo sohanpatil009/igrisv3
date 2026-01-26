@@ -463,3 +463,36 @@ impl ConnectionCoordinator {
         Ok(response)
     }
 }
+
+
+// ═══════════════════════════════════════════════════════
+// GLOBAL CONNECTION COORDINATOR
+// ═══════════════════════════════════════════════════════
+
+use once_cell::sync::Lazy;
+
+/// Global connection coordinator instance
+static GLOBAL_COORDINATOR: Lazy<Arc<Mutex<Option<Arc<ConnectionCoordinator>>>>> = 
+    Lazy::new(|| Arc::new(Mutex::new(None)));
+
+/// Get or create the global connection coordinator
+pub fn get_connection_coordinator() -> Result<Arc<ConnectionCoordinator>, String> {
+    let mut coord_lock = GLOBAL_COORDINATOR.lock()
+        .map_err(|e| format!("Lock error: {}", e))?;
+    
+    if let Some(ref coordinator) = *coord_lock {
+        return Ok(Arc::clone(coordinator));
+    }
+    
+    // Create new coordinator with global services
+    let relay = super::relay::get_relay_service();
+    let trust = Arc::new(Mutex::new(super::trust::TrustManager::new()));
+    let discovery = Arc::new(Mutex::new(None)); // Will be set by discovery service
+    
+    let coordinator = Arc::new(ConnectionCoordinator::new(relay, trust, discovery));
+    *coord_lock = Some(Arc::clone(&coordinator));
+    
+    println!("[ConnectionCoordinator] Global coordinator initialized");
+    
+    Ok(coordinator)
+}
