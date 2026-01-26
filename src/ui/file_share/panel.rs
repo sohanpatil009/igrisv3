@@ -372,22 +372,32 @@ async fn refresh_data(
     trusted: &mut Signal<Vec<TrustedDeviceDisplay>>,
     transfers: &mut Signal<Vec<TransferDisplay>>,
 ) {
+    println!("[UI] refresh_data() called");
+    
     // Get discovered devices
-    if let Ok(discovered) = crate::file_share::discovery::get_discovered_devices() {
-        let display: Vec<DeviceDisplay> = discovered.iter().map(|d| {
-            let is_trusted = crate::file_share::trust::is_device_trusted(&d.id).unwrap_or(false);
-            DeviceDisplay {
-                id: d.id.clone(),
-                label: d.label.clone(),
-                os: d.os.as_str().to_string(),
-                os_icon: get_os_icon(d.os.as_str()),
-                ip: d.ip_address.to_string(),
-                is_trusted,
-                is_online: d.is_online(),
-                code: d.code.clone(), // Include the broadcasted code
-            }
-        }).collect();
-        devices.set(display);
+    match crate::file_share::discovery::get_discovered_devices() {
+        Ok(discovered) => {
+            println!("[UI] Got {} discovered devices", discovered.len());
+            let display: Vec<DeviceDisplay> = discovered.iter().map(|d| {
+                let is_trusted = crate::file_share::trust::is_device_trusted(&d.id).unwrap_or(false);
+                println!("[UI] Processing device: {} at {}", d.label, d.ip_address);
+                DeviceDisplay {
+                    id: d.id.clone(),
+                    label: d.label.clone(),
+                    os: d.os.as_str().to_string(),
+                    os_icon: get_os_icon(d.os.as_str()),
+                    ip: d.ip_address.to_string(),
+                    is_trusted,
+                    is_online: d.is_online(),
+                    code: d.code.clone(), // Include the broadcasted code
+                }
+            }).collect();
+            println!("[UI] Setting {} devices in UI", display.len());
+            devices.set(display);
+        }
+        Err(e) => {
+            println!("[UI] Error getting discovered devices: {}", e);
+        }
     }
     
     // Get trusted devices

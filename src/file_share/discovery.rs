@@ -577,11 +577,18 @@ pub fn stop_discovery() -> Result<(), String> {
 
 /// Get discovered devices (convenience function)
 pub fn get_discovered_devices() -> Result<Vec<DiscoveredDevice>, String> {
+    println!("[Discovery] get_discovered_devices() called");
     let service_lock = get_discovery_service()?;
     let service = service_lock.lock().map_err(|e| format!("Lock error: {}", e))?;
     if let Some(ref svc) = *service {
-        Ok(svc.get_online_devices())
+        let devices = svc.get_online_devices();
+        println!("[Discovery] Found {} online devices in service", devices.len());
+        for device in &devices {
+            println!("[Discovery]   - {} at {}", device.label, device.ip_address);
+        }
+        Ok(devices)
     } else {
+        println!("[Discovery] Service not initialized, returning empty list");
         Ok(Vec::new())
     }
 }
