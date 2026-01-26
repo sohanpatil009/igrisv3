@@ -139,10 +139,24 @@ impl ConnectionCoordinator {
         
         match connection_result {
             Ok(response) => {
-                // Create a dummy registration for the direct connection
+                // Parse the response to get the real device_id
+                let (real_device_id, remote_cert_fingerprint) = match &response {
+                    super::handshake::HandshakeMessage::ResponderAck {
+                        device_id,
+                        cert_fingerprint,
+                        ..
+                    } => (device_id.clone(), cert_fingerprint.clone()),
+                    _ => {
+                        return Err(ConnectionError::TrustFailed("Invalid handshake response".to_string()));
+                    }
+                };
+                
+                println!("[ConnectionCoordinator] Received device_id from remote: {}", &real_device_id[..8]);
+                
+                // Create registration with the real device_id
                 let registration = super::relay::DeviceRegistration {
                     code: "DIRECT".to_string(),
-                    device_id: format!("direct_{}", ip_address.replace(".", "_")),
+                    device_id: real_device_id.clone(),
                     ip_address: ip_address.to_string(),
                     bridge_port,
                     hostname: device_label.to_string(),
@@ -417,6 +431,13 @@ impl ConnectionCoordinator {
                 
                 drop(trust_manager); // Release lock
                 
+                // CRITICAL FIX: Add device to BridgeManager so UI shows as connected
+                println!("[ConnectionCoordinator] Adding device to BridgeManager...");
+                if let Err(e) = super::bridge::connect_to_device(&discovered_device) {
+                    println!("[ConnectionCoordinator] Warning: Failed to add to BridgeManager: {}", e);
+                    // Don't fail the connection - trust is already established
+                }
+                
                 // Return successful connection result
                 Ok(ConnectionResult {
                     device: discovered_device,
@@ -498,18 +519,30 @@ impl ConnectionCoordinator {
         }
         
         // Add initiator to discovery cache
-        {
+        let discovered_device = {
             let discovery_lock = self.discovery.lock()
                 .map_err(|e| ConnectionError::NetworkError(format!("Lock error: {}", e)))?;
             
             if let Some(ref discovery_service) = *discovery_lock {
-                discovery_service.add_manual_device(&ip_address, bridge_port).await
+                let device = discovery_service.add_manual_device(&ip_address, bridge_port).await
                     .map_err(|e| {
                         println!("[ConnectionCoordinator] Failed to add to discovery: {}", e);
                         ConnectionError::NetworkError(format!("Failed to add to discovery: {}", e))
                     })?;
                 
                 println!("[ConnectionCoordinator] Added initiator to discovery cache");
+                Some(device)
+            } else {
+                None
+            }
+        };
+        
+        // CRITICAL FIX: Add device to BridgeManager so Windows UI shows as connected
+        if let Some(ref device) = discovered_device {
+            println!("[ConnectionCoordinator] Adding initiator to BridgeManager...");
+            if let Err(e) = super::bridge::connect_to_device(device) {
+                println!("[ConnectionCoordinator] Warning: Failed to add to BridgeManager: {}", e);
+                // Don't fail the connection - trust is already established
             }
         }
         
@@ -560,7 +593,10 @@ pub fn get_connection_coordinator() -> Result<Arc<ConnectionCoordinator>, String
     // Create new coordinator with global services
     let relay = super::relay::get_relay_service();
     let trust = Arc::new(Mutex::new(super::trust::TrustManager::new()));
-    let discovery = Arc::new(Mutex::new(None)); // Will be set by discovery service
+    
+    // Get the GLOBAL discovery service (not None!)
+    let discovery = super::discovery::get_discovery_service()
+        .map_err(|e| format!("Failed to get discovery service: {}", e))?;
     
     let coordinator = Arc::new(ConnectionCoordinator::new(relay, trust, discovery));
     *coord_lock = Some(Arc::clone(&coordinator));

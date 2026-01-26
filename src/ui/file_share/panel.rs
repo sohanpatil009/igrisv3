@@ -76,6 +76,8 @@ pub fn FileSharePanel(
                 match connect_direct_async(&d.ip, 45679, &d.label).await {
                     Ok(result) => {
                         println!("[FileShare] Connected to {}", result.device_label);
+                        // Refresh device list to show updated trust status
+                        refresh_data(&mut devices, &mut trusted_devices, &mut transfers).await;
                     },
                     Err(e) => {
                         println!("[FileShare] Connection error: {}", e);
@@ -543,8 +545,9 @@ fn get_connection_coordinator() -> Result<std::sync::Arc<crate::file_share::conn
     
     let trust = std::sync::Arc::new(Mutex::new(crate::file_share::trust::TrustManager::new()));
     
-    // Discovery service is optional - will be initialized by the main file share system
-    let discovery = std::sync::Arc::new(Mutex::new(None));
+    // Get the GLOBAL discovery service (not None!)
+    let discovery = crate::file_share::discovery::get_discovery_service()
+        .map_err(|e| format!("Failed to get discovery service: {}", e))?;
     
     let coordinator = std::sync::Arc::new(crate::file_share::connection::ConnectionCoordinator::new(
         relay,
