@@ -99,9 +99,76 @@ impl ConnectionCoordinator {
         None
     }
     
+    /// Connect to a device directly using IP address (bypassing code system)
+    /// This method performs direct connection without requiring a 4-digit code
+    pub async fn connect_direct(&self, ip_address: &str, bridge_port: u16, device_label: &str) -> Result<ConnectionResult, ConnectionError> {
+        println!("[ConnectionCoordinator] Direct connection to {} at {}:{}", device_label, ip_address, bridge_port);
+        
+        // Get local device info for handshake
+        let config = load_config()
+            .map_err(|e| ConnectionError::NetworkError(format!("Failed to load config: {}", e)))?;
+        
+        // Get local certificate fingerprint
+        let cert_manager = super::crypto::get_certificate_manager();
+        let cert_fingerprint = cert_manager.lock()
+            .map_err(|e| ConnectionError::NetworkError(format!("Lock error: {}", e)))?
+            .get_fingerprint()
+            .ok_or_else(|| ConnectionError::NetworkError("Certificate not initialized".to_string()))?;
+        
+        // Get local IP address
+        let local_ip = self.get_local_ip_address()
+            .unwrap_or_else(|| "127.0.0.1".to_string());
+        
+        // Create handshake message with local device info
+        let handshake_msg = super::handshake::HandshakeMessage::initiator_hello(
+            config.identity.id.clone(),
+            config.identity.hostname.clone(),
+            config.identity.label.clone(),
+            config.identity.os.clone(),
+            local_ip,
+            config.bridge_port,
+            cert_fingerprint.clone(),
+        );
+        
+        // Establish TLS connection to remote device
+        let connection_result = self.establish_tls_connection(
+            ip_address,
+            bridge_port,
+            handshake_msg,
+        ).await;
+        
+        match connection_result {
+            Ok(response) => {
+                // Create a dummy registration for the direct connection
+                let registration = super::relay::DeviceRegistration {
+                    code: "DIRECT".to_string(),
+                    device_id: format!("direct_{}", ip_address.replace(".", "_")),
+                    ip_address: ip_address.to_string(),
+                    bridge_port,
+                    hostname: device_label.to_string(),
+                    label: device_label.to_string(),
+                    os: super::config::OperatingSystem::Unknown,
+                    created_at: std::time::Instant::now(),
+                };
+                
+                // Add device to discovery cache
+                let discovered_device = self.add_to_discovery_cache(&registration).await?;
+                
+                // Continue to trust establishment
+                self.connect_with_code_part3(registration, discovered_device, response, cert_fingerprint).await
+            }
+            Err(e) => {
+                println!("[ConnectionCoordinator] Direct connection failed: {}", e);
+                Err(e)
+            }
+        }
+    }
     /// Connect to a device using their 4-digit code
     /// This method performs the complete connection flow:
     /// 1. Validate code format and check rate limiting
+    /// 2. Lookup device in relay service
+    /// 3. Establish TLS connection and perform handshake
+    /// 4. Establish bidirectional trust
     /// 2. Lookup device in relay service
     /// 3. Establish TLS connection and perform handshake
     /// 4. Establish bidirectional trust

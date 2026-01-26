@@ -35,27 +35,8 @@ pub fn DeviceRadar(
     on_close: EventHandler<()>,
 ) -> Element {
     let mut selected_device = use_signal(|| None::<String>);
-    let mut my_code = use_signal(|| String::new());
-    let mut remaining_seconds = use_signal(|| 0u64);
     
-    // Generate my device code on mount and refresh periodically
-    use_effect(move || {
-        spawn(async move {
-            loop {
-                match generate_device_code().await {
-                    Ok((code, remaining)) => {
-                        println!("[Radar] Generated/refreshed code: {} ({}s remaining)", code, remaining);
-                        my_code.set(code);
-                        remaining_seconds.set(remaining);
-                    },
-                    Err(e) => println!("[Radar] Error generating code: {}", e),
-                }
-                
-                // Wait 5 seconds before checking again
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-            }
-        });
-    });
+    // No code generation needed - direct connections only
     
     let mut handle_device_click = move |device_id: String| {
         selected_device.set(Some(device_id.clone()));
@@ -92,44 +73,13 @@ pub fn DeviceRadar(
                 }
             }
             
-            // My Device Code Section
+            // My Device Info Section (no code needed)
             div {
                 style: "background: #0f172a; border: 2px solid #3b82f6; border-radius: 10px; padding: 12px; margin-bottom: 16px; text-align: center;",
                 
-                div { style: "color: #94a3b8; font-size: 12px; margin-bottom: 6px;", "Your Device Code" }
-                
-                if my_code().is_empty() {
-                    div { style: "color: #64748b; font-size: 13px;", "Generating code..." }
-                } else {
-                    div {
-                        style: "display: flex; justify-content: center; gap: 6px; margin-bottom: 6px;",
-                        for digit in my_code().chars() {
-                            div {
-                                style: "width: 42px; height: 50px; background: #1e293b; border: 2px solid #3b82f6; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: bold; color: #3b82f6;",
-                                "{digit}"
-                            }
-                        }
-                    }
-                    
-                    // Remaining time display with warning indicator
-                    {
-                        let remaining = remaining_seconds();
-                        let minutes = remaining / 60;
-                        let seconds = remaining % 60;
-                        let is_warning = remaining < 60;
-                        let color = if is_warning { "#f59e0b" } else { "#64748b" };
-                        let icon = if is_warning { "⚠️ " } else { "" };
-                        
-                        rsx! {
-                            div {
-                                style: "color: {color}; font-size: 12px; margin-bottom: 4px;",
-                                "{icon}Expires in {minutes}:{seconds:02}"
-                            }
-                        }
-                    }
-                    
-                    div { style: "color: #64748b; font-size: 12px;", "Share this code to receive files" }
-                }
+                div { style: "color: #94a3b8; font-size: 12px; margin-bottom: 6px;", "Your Device" }
+                div { style: "color: #3b82f6; font-size: 16px; font-weight: bold; margin-bottom: 4px;", "Ready for Direct Connections" }
+                div { style: "color: #64748b; font-size: 12px;", "Other devices can connect to you directly" }
             }
             
             // Scanning status
@@ -207,7 +157,6 @@ pub fn DeviceRadar(
                         {
                             let device_id = device.id.clone();
                             let device_id2 = device.id.clone();
-                            let device_code = device.code.clone();
                             let is_selected = selected_device() == Some(device.id.clone());
                             let bg = if is_selected { "#334155" } else { "#1e293b" };
                             
@@ -225,9 +174,6 @@ pub fn DeviceRadar(
                                             div { 
                                                 style: "color: #64748b; font-size: 11px;", 
                                                 "{device.os} • {device.ip}"
-                                                if let Some(code) = &device_code {
-                                                    " • Code: {code}"
-                                                }
                                             }
                                         }
                                     }
@@ -267,40 +213,9 @@ pub fn DeviceRadar(
 // ASYNC HELPERS
 // ═══════════════════════════════════════════════════════
 
-/// Result of a code connection
+/// Result of a direct connection
 struct CodeConnectionResult {
     device_label: String,
-}
-
-/// Generate a 4-digit code for this device using ConnectionCoordinator
-async fn generate_device_code() -> Result<(String, u64), String> {
-    // Get the connection coordinator
-    let coordinator = get_connection_coordinator()
-        .map_err(|e| format!("Failed to get coordinator: {}", e))?;
-    
-    // Generate code
-    let connection_code = coordinator.generate_my_code()
-        .map_err(|e| format!("Failed to generate code: {}", e))?;
-    
-    Ok((connection_code.code, connection_code.remaining_seconds))
-}
-
-/// Connect to a device using their 4-digit code via ConnectionCoordinator
-async fn connect_via_code(code: &str) -> Result<CodeConnectionResult, String> {
-    // Get the connection coordinator
-    let coordinator = get_connection_coordinator()
-        .map_err(|e| format!("Failed to get coordinator: {}", e))?;
-    
-    // Connect using the code
-    let result = coordinator.connect_with_code(code).await
-        .map_err(|e| e.user_message())?;
-    
-    println!("[Radar] Connected via code to: {} (type: {:?})", 
-        result.device.label, result.connection_type);
-    
-    Ok(CodeConnectionResult {
-        device_label: result.device.label,
-    })
 }
 
 /// Get or create the ConnectionCoordinator instance

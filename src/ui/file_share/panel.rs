@@ -67,31 +67,22 @@ pub fn FileSharePanel(
         println!("[FileShare UI] Device selected: {}", device_id);
     };
     
-    // Handle connect button
+    // Handle connect button - direct IP connection
     let on_connect = move |device_id: String| {
         let device = devices().iter().find(|d| d.id == device_id).cloned();
         if let Some(d) = device {
-            // Use device's code for connection (from discovery broadcast)
-            if let Some(code) = d.code {
-                println!("[FileShare] Connecting to {} using code: {}", d.label, code);
-                spawn(async move {
-                    match connect_via_code_async(&code).await {
-                        Ok(result) => {
-                            println!("[FileShare] Connected to {}", result.device_label);
-                        },
-                        Err(e) => {
-                            println!("[FileShare] Connection error: {}", e);
-                            error_message.set(Some(format!("Connection failed: {}", e)));
-                        }
+            println!("[FileShare] Direct connecting to {} at {}", d.label, d.ip);
+            spawn(async move {
+                match connect_direct_async(&d.ip, 45679, &d.label).await {
+                    Ok(result) => {
+                        println!("[FileShare] Connected to {}", result.device_label);
+                    },
+                    Err(e) => {
+                        println!("[FileShare] Connection error: {}", e);
+                        error_message.set(Some(format!("Connection failed: {}", e)));
                     }
-                });
-            } else {
-                // No code available - ask user to enter manually
-                error_message.set(Some(format!(
-                    "Device {} doesn't have a code. Please ask them to share their 4-digit code and enter it manually.",
-                    d.label
-                )));
-            }
+                }
+            });
         }
     };
     
@@ -511,19 +502,19 @@ struct CodeConnectionResult {
     device_label: String,
 }
 
-/// Connect to a device using their 4-digit code via ConnectionCoordinator
-async fn connect_via_code_async(code: &str) -> Result<CodeConnectionResult, String> {
+/// Connect to a device directly using IP address (bypassing code system)
+async fn connect_direct_async(ip_address: &str, bridge_port: u16, device_label: &str) -> Result<CodeConnectionResult, String> {
     use std::sync::Arc;
     
     // Get the connection coordinator
     let coordinator = get_connection_coordinator()
         .map_err(|e| format!("Failed to get coordinator: {}", e))?;
     
-    // Connect using the code
-    let result = coordinator.connect_with_code(code).await
+    // Connect directly using IP
+    let result = coordinator.connect_direct(ip_address, bridge_port, device_label).await
         .map_err(|e| e.user_message())?;
     
-    println!("[FileShare] Connected via code to: {} (type: {:?})", 
+    println!("[FileShare] Direct connection successful to: {} (type: {:?})", 
         result.device.label, result.connection_type);
     
     Ok(CodeConnectionResult {

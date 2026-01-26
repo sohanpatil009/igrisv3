@@ -292,20 +292,8 @@ async fn run_broadcaster(running: Arc<Mutex<bool>>) -> Result<(), String> {
     println!("[Discovery] Broadcasting as: {} ({})", config.identity.label, &config.identity.id[..8]);
     println!("[Discovery] Multicast address: {}", multicast_addr);
     
-    // Generate code immediately so it's available for broadcasts
-    let initial_code = super::relay::generate_my_code(
-        config.identity.id.clone(),
-        "0.0.0.0".to_string(),
-        config.bridge_port,
-        config.identity.hostname.clone(),
-        config.identity.label.clone(),
-        config.identity.os.clone(),
-    )?;
-    println!("[Discovery] Generated initial broadcast code: {}", initial_code);
-    
-    // Wait 5 seconds for device discovery to complete
-    println!("[Discovery] Waiting 5 seconds for device discovery...");
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    // No code generation needed - direct IP connections only
+    println!("[Discovery] Broadcasting without codes - direct IP connections enabled");
     
     loop {
         {
@@ -314,13 +302,8 @@ async fn run_broadcaster(running: Arc<Mutex<bool>>) -> Result<(), String> {
             }
         }
         
-        // Get current code from relay service (should always exist now)
-        let my_code = super::relay::get_my_device_code(&config.identity.id);
-        
-        if my_code.is_none() {
-            println!("[Discovery] WARNING: No code found for device {}, broadcasts will not include code", 
-                &config.identity.id[..8]);
-        }
+        // Get current code from relay service (optional - not needed for direct connections)
+        let my_code = None; // Disable code system completely
         
         // Create message with current code
         let message = DiscoveryMessage::new(&config.identity, config.bridge_port)
@@ -383,6 +366,12 @@ async fn run_listener(
                             let config = load_config().unwrap_or_default();
                             config.is_trusted(&message.device_id)
                         };
+                        
+                        // Register device's code in relay service if available
+                        if let Some(ref code) = message.code {
+                            println!("[Discovery] Device {} broadcasting code: {}", message.label, code);
+                            // Note: Code registration is optional - devices can connect directly via IP
+                        }
                         
                         let device = DiscoveredDevice {
                             id: message.device_id.clone(),
