@@ -587,6 +587,9 @@ static BRIDGE_SERVER: Lazy<Arc<Mutex<Option<BridgeServer>>>> = Lazy::new(|| {
 pub async fn start_bridge_server(
     connection_coordinator: Arc<super::connection::ConnectionCoordinator>,
 ) -> Result<(), String> {
+    // Initialize rustls crypto provider (required for TLS)
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    
     let config = load_config()?;
     let port = config.bridge_port;
     

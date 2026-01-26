@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use once_cell::sync::Lazy;
 
-use super::config::OperatingSystem;
+use super::config::{OperatingSystem, load_config};
 
 /// Code validity duration (30 minutes - increased for better UX)
 const CODE_VALIDITY_DURATION: Duration = Duration::from_secs(1800);
@@ -90,6 +90,7 @@ impl RelayService {
     }
     
     /// Lookup device by 4-digit code
+    /// Excludes the current device from results
     pub fn lookup_device(&self, code: &str) -> Result<DeviceRegistration, String> {
         let mut regs = self.registrations.lock()
             .map_err(|e| format!("Lock error: {}", e))?;
@@ -102,8 +103,19 @@ impl RelayService {
             println!("[Relay] Cleaned up {} expired codes", before_count - after_count);
         }
         
-        // Find the code
+        // Get current device ID to exclude it from results
+        let my_device_id = load_config().ok().map(|c| c.identity.id);
+        
+        // Find the code (excluding our own device)
         if let Some(reg) = regs.get(code) {
+            // Skip if this is our own device
+            if let Some(ref my_id) = my_device_id {
+                if &reg.device_id == my_id {
+                    println!("[Relay] Code {} is our own device, skipping", code);
+                    return Err("Cannot connect to own device".to_string());
+                }
+            }
+            
             let age_secs = reg.created_at.elapsed().as_secs();
             let remaining_secs = CODE_VALIDITY_DURATION.as_secs().saturating_sub(age_secs);
             
