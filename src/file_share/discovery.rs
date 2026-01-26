@@ -292,27 +292,20 @@ async fn run_broadcaster(running: Arc<Mutex<bool>>) -> Result<(), String> {
     println!("[Discovery] Broadcasting as: {} ({})", config.identity.label, &config.identity.id[..8]);
     println!("[Discovery] Multicast address: {}", multicast_addr);
     
-    // Wait 5 seconds before generating code to allow device discovery to complete
-    println!("[Discovery] Waiting 5 seconds before generating code...");
+    // Generate code immediately so it's available for broadcasts
+    let initial_code = super::relay::generate_my_code(
+        config.identity.id.clone(),
+        "0.0.0.0".to_string(),
+        config.bridge_port,
+        config.identity.hostname.clone(),
+        config.identity.label.clone(),
+        config.identity.os.clone(),
+    )?;
+    println!("[Discovery] Generated initial broadcast code: {}", initial_code);
+    
+    // Wait 5 seconds for device discovery to complete
+    println!("[Discovery] Waiting 5 seconds for device discovery...");
     tokio::time::sleep(Duration::from_secs(5)).await;
-    
-    // Check if code already exists (UI might have generated it)
-    let existing_code = super::relay::get_my_device_code(&config.identity.id);
-    
-    if existing_code.is_none() {
-        // Generate initial code only if it doesn't exist
-        let initial_code = super::relay::generate_my_code(
-            config.identity.id.clone(),
-            "0.0.0.0".to_string(),
-            config.bridge_port,
-            config.identity.hostname.clone(),
-            config.identity.label.clone(),
-            config.identity.os.clone(),
-        )?;
-        println!("[Discovery] Generated initial broadcast code: {}", initial_code);
-    } else {
-        println!("[Discovery] Using existing code: {}", existing_code.unwrap());
-    }
     
     loop {
         {

@@ -46,9 +46,22 @@ impl RelayService {
     
     /// Generate a random 4-digit code
     pub fn generate_code() -> String {
-        // TEMPORARY FIX: Use fixed code "1234" for ALL devices for testing
-        // This allows cross-platform connection testing
-        "1234".to_string()
+        // TEMPORARY FIX: Use OS-specific fixed codes for testing
+        // Windows = 5678, macOS = 1234
+        #[cfg(target_os = "windows")]
+        {
+            "5678".to_string()
+        }
+        
+        #[cfg(target_os = "macos")]
+        {
+            "1234".to_string()
+        }
+        
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        {
+            "9999".to_string() // Linux/other
+        }
         
         // Original random code generation (commented out for testing)
         // use rand::Rng;
