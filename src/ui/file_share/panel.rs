@@ -547,8 +547,8 @@ fn get_connection_coordinator() -> Result<std::sync::Arc<crate::file_share::conn
         return Ok(std::sync::Arc::clone(coordinator));
     }
     
-    // Create new coordinator
-    let relay = std::sync::Arc::new(crate::file_share::relay::RelayService::new());
+    // Use the GLOBAL relay service instead of creating a new one
+    let relay = crate::file_share::relay::get_relay_service();
     
     let trust = std::sync::Arc::new(Mutex::new(crate::file_share::trust::TrustManager::new()));
     

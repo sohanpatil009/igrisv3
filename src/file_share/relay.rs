@@ -8,8 +8,8 @@ use once_cell::sync::Lazy;
 
 use super::config::OperatingSystem;
 
-/// Code validity duration (10 minutes)
-const CODE_VALIDITY_DURATION: Duration = Duration::from_secs(600);
+/// Code validity duration (30 minutes - increased for better UX)
+const CODE_VALIDITY_DURATION: Duration = Duration::from_secs(1800);
 
 /// Device registration with 4-digit code
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,9 +46,14 @@ impl RelayService {
     
     /// Generate a random 4-digit code
     pub fn generate_code() -> String {
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
-        format!("{:04}", rng.gen_range(1000..9999))
+        // TEMPORARY FIX: Use fixed code "1234" for ALL devices for testing
+        // This allows cross-platform connection testing
+        "1234".to_string()
+        
+        // Original random code generation (commented out for testing)
+        // use rand::Rng;
+        // let mut rng = rand::thread_rng();
+        // format!("{:04}", rng.gen_range(1000..9999))
     }
     
     /// Register this device with a 4-digit code
@@ -65,7 +70,7 @@ impl RelayService {
         
         let registration = DeviceRegistration {
             code: code.clone(),
-            device_id,
+            device_id: device_id.clone(),
             ip_address,
             bridge_port,
             hostname,
@@ -79,7 +84,8 @@ impl RelayService {
         
         regs.insert(code.clone(), registration);
         
-        println!("[Relay] Device registered with code: {}", code);
+        println!("[Relay] Device registered: device_id={}, code={}", 
+            &device_id[..8.min(device_id.len())], code);
         Ok(code)
     }
     
@@ -89,16 +95,31 @@ impl RelayService {
             .map_err(|e| format!("Lock error: {}", e))?;
         
         // Clean up expired codes
+        let before_count = regs.len();
         regs.retain(|_, reg| !reg.is_expired());
+        let after_count = regs.len();
+        if before_count != after_count {
+            println!("[Relay] Cleaned up {} expired codes", before_count - after_count);
+        }
         
         // Find the code
         if let Some(reg) = regs.get(code) {
+            let age_secs = reg.created_at.elapsed().as_secs();
+            let remaining_secs = CODE_VALIDITY_DURATION.as_secs().saturating_sub(age_secs);
+            
             if reg.is_expired() {
+                println!("[Relay] Code {} expired (age: {}s, validity: {}s)", 
+                    code, age_secs, CODE_VALIDITY_DURATION.as_secs());
                 regs.remove(code);
                 return Err("Code expired".to_string());
             }
+            
+            println!("[Relay] Code {} found! Device: {}, Age: {}s, Remaining: {}s", 
+                code, reg.label, age_secs, remaining_secs);
             Ok(reg.clone())
         } else {
+            println!("[Relay] Code {} not found. Available codes: {:?}", 
+                code, regs.keys().collect::<Vec<_>>());
             Err("Code not found or expired".to_string())
         }
     }
@@ -161,12 +182,12 @@ impl RelayService {
     }
 }
 
-/// Global relay service instance
-static RELAY_SERVICE: Lazy<RelayService> = Lazy::new(|| RelayService::new());
+/// Global relay service instance wrapped in Arc for sharing
+static RELAY_SERVICE: Lazy<Arc<RelayService>> = Lazy::new(|| Arc::new(RelayService::new()));
 
 /// Get the global relay service instance
 pub fn get_relay_service() -> Arc<RelayService> {
-    Arc::new(RelayService::new())
+    Arc::clone(&RELAY_SERVICE)
 }
 
 /// Get a reference to the global relay service
@@ -198,7 +219,13 @@ pub fn invalidate_code(code: &str) -> Result<(), String> {
 
 /// Get my device's current code
 pub fn get_my_device_code(device_id: &str) -> Option<String> {
-    RELAY_SERVICE.get_my_code(device_id)
+    let code = RELAY_SERVICE.get_my_code(device_id);
+    if let Some(ref c) = code {
+        println!("[Relay] get_my_device_code({}) = {}", &device_id[..8.min(device_id.len())], c);
+    } else {
+        println!("[Relay] get_my_device_code({}) = None (no code registered)", &device_id[..8.min(device_id.len())]);
+    }
+    code
 }
 
 /// Update an existing registration to refresh its expiry time

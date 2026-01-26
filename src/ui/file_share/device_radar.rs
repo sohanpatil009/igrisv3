@@ -37,9 +37,6 @@ pub fn DeviceRadar(
     let mut selected_device = use_signal(|| None::<String>);
     let mut my_code = use_signal(|| String::new());
     let mut remaining_seconds = use_signal(|| 0u64);
-    let mut input_code = use_signal(|| String::new());
-    let mut connection_status = use_signal(|| ConnectionStatus::Idle);
-    let mut connecting_device_id = use_signal(|| None::<String>);
     
     // Generate my device code on mount and refresh periodically
     use_effect(move || {
@@ -74,56 +71,22 @@ pub fn DeviceRadar(
         on_close.call(());
     };
     
-    // Handle manual code connection
-    let handle_code_connect = move |_| {
-        let code = input_code();
-        if code.len() != 4 {
-            connection_status.set(ConnectionStatus::Error("Code must be 4 digits".to_string()));
-            return;
-        }
-        
-        connection_status.set(ConnectionStatus::Connecting("device".to_string()));
-        connecting_device_id.set(None);
-        
-        spawn(async move {
-            match connect_via_code(&code).await {
-                Ok(result) => {
-                    println!("[Radar] Connected via code to: {}", result.device_label);
-                    
-                    // Show success message
-                    connection_status.set(ConnectionStatus::Connected(result.device_label.clone()));
-                    
-                    // Clear input
-                    input_code.set(String::new());
-                    
-                    // Clear success message after 3 seconds
-                    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-                    connection_status.set(ConnectionStatus::Idle);
-                },
-                Err(e) => {
-                    println!("[Radar] Code connection error: {}", e);
-                    connection_status.set(ConnectionStatus::Error(e));
-                }
-            }
-        });
-    };
-    
     rsx! {
         div {
             class: "device-radar-container",
-            style: "background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border-radius: 16px; padding: 24px; min-width: 450px; max-width: min(800px, 90vw); width: min(600px, 85vw); max-height: 90vh; overflow-y: auto; overflow-x: hidden;",
+            style: "background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border-radius: 12px; padding: 16px; min-width: 360px; max-width: 500px; width: 400px; max-height: 80vh; overflow-y: auto; overflow-x: hidden; resize: both;",
             
             // Header with close button
             div {
-                style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;",
+                style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;",
                 
                 h2 {
-                    style: "color: #fff; margin: 0; font-size: 20px;",
+                    style: "color: #fff; margin: 0; font-size: 18px;",
                     "📡 File Share"
                 }
                 
                 button {
-                    style: "background: transparent; border: none; color: #888; cursor: pointer; font-size: 20px;",
+                    style: "background: transparent; border: none; color: #888; cursor: pointer; font-size: 18px; padding: 4px;",
                     onclick: handle_close,
                     "✕"
                 }
@@ -131,18 +94,18 @@ pub fn DeviceRadar(
             
             // My Device Code Section
             div {
-                style: "background: #0f172a; border: 2px solid #3b82f6; border-radius: 12px; padding: 16px; margin-bottom: 20px; text-align: center;",
+                style: "background: #0f172a; border: 2px solid #3b82f6; border-radius: 10px; padding: 12px; margin-bottom: 16px; text-align: center;",
                 
-                div { style: "color: #94a3b8; font-size: 14px; margin-bottom: 8px;", "Your Device Code" }
+                div { style: "color: #94a3b8; font-size: 12px; margin-bottom: 6px;", "Your Device Code" }
                 
                 if my_code().is_empty() {
-                    div { style: "color: #64748b; font-size: 14px;", "Generating code..." }
+                    div { style: "color: #64748b; font-size: 13px;", "Generating code..." }
                 } else {
                     div {
-                        style: "display: flex; justify-content: center; gap: 8px; margin-bottom: 8px;",
+                        style: "display: flex; justify-content: center; gap: 6px; margin-bottom: 6px;",
                         for digit in my_code().chars() {
                             div {
-                                style: "width: 50px; height: 60px; background: #1e293b; border: 2px solid #3b82f6; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: bold; color: #3b82f6;",
+                                style: "width: 42px; height: 50px; background: #1e293b; border: 2px solid #3b82f6; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: bold; color: #3b82f6;",
                                 "{digit}"
                             }
                         }
@@ -183,7 +146,7 @@ pub fn DeviceRadar(
             
             // Radar visualization
             div {
-                style: "position: relative; width: min(300px, 100%); height: min(300px, 100%); aspect-ratio: 1; margin: 0 auto 20px; background: radial-gradient(circle, #0f172a 0%, #1e293b 100%); border-radius: 50%; border: 2px solid #334155;",
+                style: "position: relative; width: 200px; height: 200px; margin: 0 auto 14px; background: radial-gradient(circle, #0f172a 0%, #1e293b 100%); border-radius: 50%; border: 2px solid #334155; flex-shrink: 0;",
                 
                 // Radar rings
                 div { style: "position: absolute; top: 25%; left: 25%; width: 50%; height: 50%; border: 1px solid #334155; border-radius: 50%;" }
@@ -196,9 +159,9 @@ pub fn DeviceRadar(
                 for (i, device) in devices.iter().enumerate() {
                     {
                         let angle = (i as f64) * (360.0 / devices.len().max(1) as f64);
-                        let radius = if device.is_trusted { 60.0 } else { 100.0 };
-                        let x = 150.0 + radius * (angle * std::f64::consts::PI / 180.0).cos();
-                        let y = 150.0 + radius * (angle * std::f64::consts::PI / 180.0).sin();
+                        let radius = if device.is_trusted { 40.0 } else { 70.0 };
+                        let x = 100.0 + radius * (angle * std::f64::consts::PI / 180.0).cos();
+                        let y = 100.0 + radius * (angle * std::f64::consts::PI / 180.0).sin();
                         let color = if device.is_trusted { "#4ade80" } else { "#f59e0b" };
                         let device_id = device.id.clone();
                         
@@ -226,12 +189,12 @@ pub fn DeviceRadar(
             
             // Device list
             div {
-                style: "margin-bottom: 20px;",
+                style: "margin-bottom: 14px; flex: 1; min-height: 0;",
                 
-                div { style: "color: #94a3b8; font-size: 14px; margin-bottom: 12px; font-weight: 500;", "Discovered Devices" }
+                div { style: "color: #94a3b8; font-size: 13px; margin-bottom: 10px; font-weight: 500;", "Discovered Devices" }
                 
                 div {
-                    style: "max-height: 200px; overflow-y: auto;",
+                    style: "max-height: 160px; overflow-y: auto;",
                     
                     if devices.is_empty() {
                         div {
@@ -251,16 +214,16 @@ pub fn DeviceRadar(
                             rsx! {
                                 div {
                                     key: "{device.id}",
-                                    style: "display: flex; align-items: center; justify-content: space-between; padding: 12px; background: {bg}; border-radius: 8px; margin-bottom: 8px; cursor: pointer;",
+                                    style: "display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; background: {bg}; border-radius: 6px; margin-bottom: 6px; cursor: pointer;",
                                     onclick: move |_| handle_device_click(device_id.clone()),
                                     
                                     div {
-                                        style: "display: flex; align-items: center; gap: 12px;",
-                                        span { style: "font-size: 24px;", "{device.os_icon}" }
+                                        style: "display: flex; align-items: center; gap: 8px;",
+                                        span { style: "font-size: 20px;", "{device.os_icon}" }
                                         div {
-                                            div { style: "color: #fff; font-weight: 500;", "{device.label}" }
+                                            div { style: "color: #fff; font-weight: 500; font-size: 13px;", "{device.label}" }
                                             div { 
-                                                style: "color: #64748b; font-size: 12px;", 
+                                                style: "color: #64748b; font-size: 11px;", 
                                                 "{device.os} • {device.ip}"
                                                 if let Some(code) = &device_code {
                                                     " • Code: {code}"
@@ -273,35 +236,15 @@ pub fn DeviceRadar(
                                         style: "display: flex; align-items: center; gap: 8px;",
                                         if device.is_trusted {
                                             span { style: "color: #4ade80; font-size: 12px;", "✓ Connected" }
-                                        } else if let Some(ref code) = device_code {
-                                            // Show code with "Use Code" button
-                                            div {
-                                                style: "display: flex; flex-direction: column; align-items: flex-end; gap: 4px;",
-                                                div {
-                                                    style: "background: #3b82f6; color: white; padding: 4px 12px; border-radius: 6px; font-size: 14px; font-weight: bold; letter-spacing: 2px;",
-                                                    "{code}"
-                                                }
-                                                button {
-                                                    style: "background: #10b981; color: white; border: none; padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 11px;",
-                                                    onclick: {
-                                                        let code_val = code.clone();
-                                                        move |e| {
-                                                            e.stop_propagation();
-                                                            input_code.set(code_val.clone());
-                                                        }
-                                                    },
-                                                    "Use Code"
-                                                }
-                                            }
                                         } else {
-                                            // No code available, show connect button
+                                            // Direct connect button - bypass code system
                                             button {
-                                                style: "background: #3b82f6; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;",
+                                                style: "background: #10b981; color: white; border: none; padding: 6px 16px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500;",
                                                 onclick: move |e| {
                                                     e.stop_propagation();
                                                     handle_connect(device_id2.clone());
                                                 },
-                                                "Connect"
+                                                "🔗 Connect"
                                             }
                                         }
                                     }
@@ -309,78 +252,6 @@ pub fn DeviceRadar(
                             }
                         }
                     }
-                }
-            }
-            
-            // Manual Code Connection Section
-            div {
-                style: "background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 16px;",
-                
-                div { style: "color: #94a3b8; font-size: 14px; margin-bottom: 12px; font-weight: 500;", "Connect to Device" }
-                
-                div {
-                    style: "display: flex; gap: 8px; align-items: flex-start;",
-                    
-                    div {
-                        style: "flex: 1;",
-                        input {
-                            r#type: "text",
-                            placeholder: "Enter 4-digit code",
-                            maxlength: 4,
-                            value: "{input_code}",
-                            style: "width: 100%; padding: 10px; background: #1e293b; border: 2px solid #334155; border-radius: 8px; color: #fff; font-size: 16px; text-align: center; letter-spacing: 8px; font-weight: bold;",
-                            oninput: move |e| {
-                                let val = e.value();
-                                // Only allow numbers, max 4 digits
-                                if val.chars().all(|c| c.is_numeric()) && val.len() <= 4 {
-                                    input_code.set(val);
-                                    // Clear error when user types
-                                    if matches!(connection_status(), ConnectionStatus::Error(_)) {
-                                        connection_status.set(ConnectionStatus::Idle);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    button {
-                        style: "background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500;",
-                        disabled: input_code().len() != 4 || matches!(connection_status(), ConnectionStatus::Connecting(_)),
-                        onclick: handle_code_connect,
-                        if matches!(connection_status(), ConnectionStatus::Connecting(_)) {
-                            "Connecting..."
-                        } else {
-                            "Connect"
-                        }
-                    }
-                }
-                
-                // Connection status messages
-                match connection_status() {
-                    ConnectionStatus::Connecting(label) => rsx! {
-                        div {
-                            style: "margin-top: 8px; color: #3b82f6; font-size: 12px;",
-                            "🔄 Connecting to {label}..."
-                        }
-                    },
-                    ConnectionStatus::Connected(label) => rsx! {
-                        div {
-                            style: "margin-top: 8px; color: #4ade80; font-size: 12px;",
-                            "✓ Connected to {label}"
-                        }
-                    },
-                    ConnectionStatus::Error(err) => rsx! {
-                        div {
-                            style: "margin-top: 8px; color: #ef4444; font-size: 12px;",
-                            "⚠️ {err}"
-                        }
-                    },
-                    ConnectionStatus::Idle => rsx! {
-                        div {
-                            style: "margin-top: 8px; color: #64748b; font-size: 11px;",
-                            "Enter the 4-digit code from another device to connect"
-                        }
-                    },
                 }
             }
         }
@@ -448,8 +319,8 @@ fn get_connection_coordinator() -> Result<Arc<crate::file_share::connection::Con
         return Ok(Arc::clone(coordinator));
     }
     
-    // Create new coordinator
-    let relay = Arc::new(crate::file_share::relay::RelayService::new());
+    // Use the GLOBAL relay service instead of creating a new one
+    let relay = crate::file_share::relay::get_relay_service();
     
     let trust = Arc::new(Mutex::new(crate::file_share::trust::TrustManager::new()));
     
