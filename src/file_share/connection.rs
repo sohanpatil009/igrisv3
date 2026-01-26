@@ -373,7 +373,7 @@ impl ConnectionCoordinator {
     /// Part 3 of connect_with_code - establish trust and return result
     async fn connect_with_code_part3(
         &self,
-        registration: super::relay::DeviceRegistration,
+        mut registration: super::relay::DeviceRegistration,
         discovered_device: super::discovery::DiscoveredDevice,
         handshake_response: super::handshake::HandshakeMessage,
         local_cert_fingerprint: String,
@@ -387,7 +387,13 @@ impl ConnectionCoordinator {
             } => {
                 println!("[ConnectionCoordinator] Received ResponderAck from {}", &device_id[..8]);
                 
-                // Verify device_id matches
+                // For direct connections, update the registration with the real device_id
+                if registration.code == "DIRECT" {
+                    registration.device_id = device_id.clone();
+                    println!("[ConnectionCoordinator] Updated direct connection device_id to {}", &device_id[..8]);
+                }
+                
+                // Verify device_id matches (should match now after update)
                 if device_id != registration.device_id {
                     return Err(ConnectionError::TrustFailed(
                         "Device ID mismatch in handshake response".to_string()
