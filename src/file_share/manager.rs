@@ -115,6 +115,18 @@ impl FileShareManager {
         let _ = rustls::crypto::ring::default_provider().install_default();
         println!("[FileShare] Rustls crypto provider initialized");
         
+        // Step 0.5: Request firewall permissions
+        println!("[FileShare] Checking firewall permissions...");
+        match crate::platform::request_firewall_permission() {
+            Ok(_) => {
+                println!("[FileShare] Firewall permissions OK");
+            }
+            Err(e) => {
+                println!("[FileShare] Firewall warning: {}", e);
+                crate::platform::show_firewall_instructions();
+            }
+        }
+        
         // Step 1: Get or create device identity
         self.device_identity = Some(get_or_create_device_identity()?);
         println!("[FileShare] Device identity ready");
