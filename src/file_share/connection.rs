@@ -203,6 +203,23 @@ impl ConnectionCoordinator {
         let relay_address = super::quic_relay::get_default_relay_address();
         println!("[ConnectionCoordinator] Using relay server: {}", relay_address);
         
+        // AUTO-START RELAY SERVER if it's localhost and not running
+        if relay_address.starts_with("127.0.0.1:") || relay_address.starts_with("localhost:") {
+            if let Err(_) = self.test_relay_server_connection(&relay_address).await {
+                println!("[ConnectionCoordinator] Relay server not running, auto-starting...");
+                if let Err(e) = self.auto_start_relay_server().await {
+                    println!("[ConnectionCoordinator] Failed to auto-start relay server: {}", e);
+                    // Continue anyway - maybe external relay is available
+                } else {
+                    println!("[ConnectionCoordinator] ✓ Relay server auto-started");
+                    // Give it a moment to initialize
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+            } else {
+                println!("[ConnectionCoordinator] ✓ Relay server already running");
+            }
+        }
+        
         // Create temporary device ID for remote (we'll get real one from handshake)
         let temp_remote_id = format!("temp_{}", ip_address.replace(".", "_"));
         
@@ -773,6 +790,70 @@ impl ConnectionCoordinator {
         println!("[ConnectionCoordinator] Sending ResponderAck to {}", label);
         
         Ok(response)
+    }
+    
+    /// Test if relay server is running by attempting a quick connection
+    async fn test_relay_server_connection(&self, relay_address: &str) -> Result<(), String> {
+        use std::time::Duration;
+        
+        // Parse address
+        let addr: std::net::SocketAddr = relay_address.parse()
+            .map_err(|e| format!("Invalid relay address: {}", e))?;
+        
+        // Try to connect with short timeout
+        let result = tokio::time::timeout(
+            Duration::from_millis(1000),
+            tokio::net::TcpStream::connect(addr)
+        ).await;
+        
+        match result {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(e)) => Err(format!("Connection failed: {}", e)),
+            Err(_) => Err("Connection timeout".to_string()),
+        }
+    }
+    
+    /// Auto-start relay server as a background process
+    async fn auto_start_relay_server(&self) -> Result<(), String> {
+        use std::process::Command;
+        
+        println!("[ConnectionCoordinator] Starting relay server process...");
+        
+        // Get the path to relay_server executable
+        let exe_path = if cfg!(target_os = "windows") {
+            "./target/release/relay_server.exe"
+        } else {
+            "./target/release/relay_server"
+        };
+        
+        // Check if executable exists
+        if !std::path::Path::new(exe_path).exists() {
+            return Err(format!("Relay server executable not found at: {}", exe_path));
+        }
+        
+        // Start relay server as background process
+        let mut cmd = Command::new(exe_path);
+        
+        #[cfg(target_os = "windows")]
+        {
+            // On Windows, use CREATE_NEW_PROCESS_GROUP to run independently
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x00000200); // CREATE_NEW_PROCESS_GROUP
+        }
+        
+        let child = cmd
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .stdin(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| format!("Failed to start relay server: {}", e))?;
+        
+        println!("[ConnectionCoordinator] Relay server started with PID: {}", child.id());
+        
+        // Don't wait for the process - let it run independently
+        std::mem::forget(child);
+        
+        Ok(())
     }
 }
 

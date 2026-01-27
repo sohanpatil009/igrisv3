@@ -216,7 +216,16 @@ impl QuicBridgeManager {
             })?;
         
         println!("[QuicBridge] Waiting for connection to establish...");
-        let connection = connecting.await
+        
+        // Add 10-second timeout for connection establishment
+        let connection = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            connecting
+        ).await
+            .map_err(|_| {
+                println!("[QuicBridge] Connection timed out after 10 seconds");
+                "Connection timed out after 10 seconds".to_string()
+            })?
             .map_err(|e| {
                 println!("[QuicBridge] Connection failed: {}", e);
                 format!("Connection failed: {}", e)
