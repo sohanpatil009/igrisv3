@@ -111,6 +111,10 @@ impl FileShareManager {
         self.state = FileShareState::Initializing;
         println!("[FileShare] Initializing file share services...");
         
+        // Step 0: Initialize rustls crypto provider (CRITICAL for QUIC)
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        println!("[FileShare] Rustls crypto provider initialized");
+        
         // Step 1: Get or create device identity
         self.device_identity = Some(get_or_create_device_identity()?);
         println!("[FileShare] Device identity ready");
