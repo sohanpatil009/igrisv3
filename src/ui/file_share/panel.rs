@@ -71,8 +71,10 @@ pub fn FileSharePanel(
     let on_connect = move |device_id: String| {
         let device = devices().iter().find(|d| d.id == device_id).cloned();
         if let Some(d) = device {
+            println!("[FileShare] on_connect() called for device: {} at {}", d.label, d.ip);
             println!("[FileShare] Direct connecting to {} at {}", d.label, d.ip);
             spawn(async move {
+                println!("[FileShare] Spawned async task for connection");
                 match connect_direct_async(&d.ip, 45679, &d.label).await {
                     Ok(result) => {
                         println!("[FileShare] Connected to {}", result.device_label);
@@ -81,10 +83,12 @@ pub fn FileSharePanel(
                     },
                     Err(e) => {
                         println!("[FileShare] Connection error: {}", e);
-                        error_message.set(Some(format!("Connection failed: {}", e)));
+                        error_message.set(Some(format!("Connection failed - check network and try again")));
                     }
                 }
             });
+        } else {
+            println!("[FileShare] Device not found in devices list: {}", device_id);
         }
     };
     
@@ -522,13 +526,23 @@ struct CodeConnectionResult {
 async fn connect_direct_async(ip_address: &str, bridge_port: u16, device_label: &str) -> Result<CodeConnectionResult, String> {
     use std::sync::Arc;
     
+    println!("[FileShare] connect_direct_async() called for {} at {}:{}", device_label, ip_address, bridge_port);
+    
     // Get the connection coordinator
     let coordinator = get_connection_coordinator()
-        .map_err(|e| format!("Failed to get coordinator: {}", e))?;
+        .map_err(|e| {
+            println!("[FileShare] Failed to get coordinator: {}", e);
+            format!("Failed to get coordinator: {}", e)
+        })?;
+    
+    println!("[FileShare] Got connection coordinator, calling connect_direct()...");
     
     // Connect directly using IP
     let result = coordinator.connect_direct(ip_address, bridge_port, device_label).await
-        .map_err(|e| e.user_message())?;
+        .map_err(|e| {
+            println!("[FileShare] connect_direct() failed: {:?}", e);
+            e.user_message()
+        })?;
     
     println!("[FileShare] Direct connection successful to: {} (type: {:?})", 
         result.device.label, result.connection_type);

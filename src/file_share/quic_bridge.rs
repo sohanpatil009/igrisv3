@@ -186,7 +186,10 @@ impl QuicBridgeManager {
     
     /// Connect to a discovered device
     pub async fn connect(&mut self, device: &DiscoveredDevice) -> Result<(), String> {
+        println!("[QuicBridge] connect() called for device: {} ({})", device.label, &device.id[..8]);
+        
         if self.connections.contains_key(&device.id) {
+            println!("[QuicBridge] Already connected to {}", device.label);
             return Err("Already connected to this device".to_string());
         }
         
@@ -197,13 +200,27 @@ impl QuicBridgeManager {
             device.label, device.ip_address, device.bridge_port);
         
         let addr: SocketAddr = format!("{}:{}", device.ip_address, device.bridge_port).parse()
-            .map_err(|e| format!("Invalid address: {}", e))?;
+            .map_err(|e| {
+                println!("[QuicBridge] Invalid address format: {}", e);
+                format!("Invalid address: {}", e)
+            })?;
+        
+        println!("[QuicBridge] Parsed address: {}", addr);
         
         // Connect with QUIC (TLS handshake automatic!)
-        let connection = endpoint.connect(addr, "localhost")
-            .map_err(|e| format!("Failed to initiate connection: {}", e))?
-            .await
-            .map_err(|e| format!("Connection failed: {}", e))?;
+        println!("[QuicBridge] Initiating QUIC connection...");
+        let connecting = endpoint.connect(addr, "localhost")
+            .map_err(|e| {
+                println!("[QuicBridge] Failed to initiate connection: {}", e);
+                format!("Failed to initiate connection: {}", e)
+            })?;
+        
+        println!("[QuicBridge] Waiting for connection to establish...");
+        let connection = connecting.await
+            .map_err(|e| {
+                println!("[QuicBridge] Connection failed: {}", e);
+                format!("Connection failed: {}", e)
+            })?;
         
         println!("[QuicBridge] QUIC connection established to {}", device.label);
         
@@ -218,6 +235,8 @@ impl QuicBridgeManager {
         let _ = self.event_sender.send(QuicBridgeEvent::Connected { 
             device_id: device.id.clone() 
         });
+        
+        println!("[QuicBridge] Device {} added to connections map", device.label);
         
         Ok(())
     }

@@ -320,14 +320,25 @@ impl ConnectionCoordinator {
     ) -> Result<super::handshake::HandshakeMessage, ConnectionError> {
         use super::quic_bridge::get_quic_bridge_manager;
         
+        println!("[ConnectionCoordinator] establish_quic_connection_with_handshake() called for {}:{}", ip_address, port);
+        
         let manager_lock = get_quic_bridge_manager()
-            .map_err(|e| ConnectionError::NetworkError(e))?;
+            .map_err(|e| {
+                println!("[ConnectionCoordinator] Failed to get QUIC bridge manager: {}", e);
+                ConnectionError::NetworkError(e)
+            })?;
         
         let mut manager = manager_lock.lock()
-            .map_err(|e| ConnectionError::NetworkError(format!("Lock error: {}", e)))?;
+            .map_err(|e| {
+                println!("[ConnectionCoordinator] Failed to lock manager: {}", e);
+                ConnectionError::NetworkError(format!("Lock error: {}", e))
+            })?;
         
         let mgr = manager.as_mut()
-            .ok_or_else(|| ConnectionError::NetworkError("QUIC bridge not initialized".to_string()))?;
+            .ok_or_else(|| {
+                println!("[ConnectionCoordinator] QUIC bridge not initialized");
+                ConnectionError::NetworkError("QUIC bridge not initialized".to_string())
+            })?;
         
         // Create temporary device for connection
         let temp_device = super::discovery::DiscoveredDevice {
@@ -336,51 +347,92 @@ impl ConnectionCoordinator {
             label: ip_address.to_string(),
             os: super::config::OperatingSystem::Unknown,
             ip_address: ip_address.parse()
-                .map_err(|e| ConnectionError::NetworkError(format!("Invalid IP: {}", e)))?,
+                .map_err(|e| {
+                    println!("[ConnectionCoordinator] Invalid IP address: {}", e);
+                    ConnectionError::NetworkError(format!("Invalid IP: {}", e))
+                })?,
             bridge_port: port,
             last_seen: std::time::Instant::now(),
             is_trusted: false,
             code: None,
         };
         
+        println!("[ConnectionCoordinator] Created temp device: {} at {}:{}", temp_device.label, temp_device.ip_address, temp_device.bridge_port);
+        
         // Connect via QUIC (TLS 1.3 automatic!)
+        println!("[ConnectionCoordinator] Calling mgr.connect()...");
         mgr.connect(&temp_device).await
-            .map_err(|e| ConnectionError::NetworkError(e))?;
+            .map_err(|e| {
+                println!("[ConnectionCoordinator] QUIC connect failed: {}", e);
+                ConnectionError::NetworkError(e)
+            })?;
+        
+        println!("[ConnectionCoordinator] QUIC connection established, getting connection from map...");
         
         // Send handshake message over QUIC stream
         let handshake_bytes = serde_json::to_vec(&handshake_msg)
-            .map_err(|e| ConnectionError::NetworkError(format!("Serialize error: {}", e)))?;
+            .map_err(|e| {
+                println!("[ConnectionCoordinator] Failed to serialize handshake: {}", e);
+                ConnectionError::NetworkError(format!("Serialize error: {}", e))
+            })?;
         
         let conn = mgr.connections.get(&temp_device.id)
-            .ok_or_else(|| ConnectionError::NetworkError("Connection not found".to_string()))?;
+            .ok_or_else(|| {
+                println!("[ConnectionCoordinator] Connection not found in map after connect");
+                ConnectionError::NetworkError("Connection not found".to_string())
+            })?;
         
+        println!("[ConnectionCoordinator] Opening bidirectional stream...");
         let (mut send, mut recv) = conn.connection.open_bi().await
-            .map_err(|e| ConnectionError::NetworkError(format!("Failed to open stream: {}", e)))?;
+            .map_err(|e| {
+                println!("[ConnectionCoordinator] Failed to open stream: {}", e);
+                ConnectionError::NetworkError(format!("Failed to open stream: {}", e))
+            })?;
         
         // Send handshake
+        println!("[ConnectionCoordinator] Sending handshake ({} bytes)...", handshake_bytes.len());
         let len = handshake_bytes.len() as u32;
         send.write_all(&len.to_be_bytes()).await
-            .map_err(|e| ConnectionError::NetworkError(format!("Failed to send length: {}", e)))?;
+            .map_err(|e| {
+                println!("[ConnectionCoordinator] Failed to send length: {}", e);
+                ConnectionError::NetworkError(format!("Failed to send length: {}", e))
+            })?;
         send.write_all(&handshake_bytes).await
-            .map_err(|e| ConnectionError::NetworkError(format!("Failed to send: {}", e)))?;
+            .map_err(|e| {
+                println!("[ConnectionCoordinator] Failed to send handshake: {}", e);
+                ConnectionError::NetworkError(format!("Failed to send: {}", e))
+            })?;
         send.finish()
-            .map_err(|e| ConnectionError::NetworkError(format!("Failed to finish: {}", e)))?;
+            .map_err(|e| {
+                println!("[ConnectionCoordinator] Failed to finish stream: {}", e);
+                ConnectionError::NetworkError(format!("Failed to finish: {}", e))
+            })?;
         
         println!("[ConnectionCoordinator] Handshake sent, waiting for response...");
         
         // Receive response
         let mut len_buf = [0u8; 4];
         recv.read_exact(&mut len_buf).await
-            .map_err(|e| ConnectionError::NetworkError(format!("Failed to read length: {}", e)))?;
+            .map_err(|e| {
+                println!("[ConnectionCoordinator] Failed to read response length: {}", e);
+                ConnectionError::NetworkError(format!("Failed to read length: {}", e))
+            })?;
         let len = u32::from_be_bytes(len_buf) as usize;
         
+        println!("[ConnectionCoordinator] Reading response ({} bytes)...", len);
         let response_bytes = recv.read_to_end(len).await
-            .map_err(|e| ConnectionError::NetworkError(format!("Failed to receive: {}", e)))?;
+            .map_err(|e| {
+                println!("[ConnectionCoordinator] Failed to read response: {}", e);
+                ConnectionError::NetworkError(format!("Failed to receive: {}", e))
+            })?;
         
         let response: super::handshake::HandshakeMessage = serde_json::from_slice(&response_bytes)
-            .map_err(|e| ConnectionError::NetworkError(format!("Deserialize error: {}", e)))?;
+            .map_err(|e| {
+                println!("[ConnectionCoordinator] Failed to deserialize response: {}", e);
+                ConnectionError::NetworkError(format!("Deserialize error: {}", e))
+            })?;
         
-        println!("[ConnectionCoordinator] Handshake response received");
+        println!("[ConnectionCoordinator] Handshake response received successfully");
         
         Ok(response)
     }
