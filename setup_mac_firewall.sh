@@ -15,16 +15,37 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# Get the IGRIS binary path
-IGRIS_PATH="$HOME/ai/igrisv3/target/release/igrisv3"
+# Try multiple possible paths
+POSSIBLE_PATHS=(
+    "$HOME/ai/igrisv3/target/release/igrisv3"
+    "$HOME/ai/igrisv3/target/debug/igrisv3"
+    "$(pwd)/target/release/igrisv3"
+    "$(pwd)/target/debug/igrisv3"
+)
+
+IGRIS_PATH=""
+for path in "${POSSIBLE_PATHS[@]}"; do
+    if [ -f "$path" ]; then
+        IGRIS_PATH="$path"
+        break
+    fi
+done
 
 # Check if binary exists
-if [ ! -f "$IGRIS_PATH" ]; then
-    echo "❌ IGRIS binary not found at: $IGRIS_PATH"
+if [ -z "$IGRIS_PATH" ]; then
+    echo "❌ IGRIS binary not found"
+    echo ""
+    echo "Tried these locations:"
+    for path in "${POSSIBLE_PATHS[@]}"; do
+        echo "  - $path"
+    done
     echo ""
     echo "Please build IGRIS first:"
     echo "  cd ~/ai/igrisv3"
     echo "  cargo build --release"
+    echo ""
+    echo "Or if running with 'cargo run', build debug version:"
+    echo "  cargo build"
     exit 1
 fi
 
@@ -64,9 +85,12 @@ if echo "$CHECK_RESULT" | grep -q "permitted\|allowed"; then
     echo ""
     echo "IGRIS can now accept incoming File Share connections!"
     echo ""
-    echo "You can now run IGRIS normally:"
+    echo "You can now run IGRIS:"
     echo "  cd ~/ai/igrisv3"
     echo "  cargo run --release"
+    echo ""
+    echo "Or for development:"
+    echo "  cargo run"
 else
     echo ""
     echo "⚠️  Could not verify firewall configuration"
