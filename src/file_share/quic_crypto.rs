@@ -145,6 +145,7 @@ pub fn get_quic_cert_manager() -> Result<Arc<Mutex<Option<QuicCertManager>>>, St
         *manager = Some(QuicCertManager::new()?);
     }
     
+    drop(manager); // Release lock before returning
     Ok(QUIC_CERT_MANAGER.clone())
 }
 
