@@ -28,13 +28,16 @@ pub mod config;
 pub mod crypto;
 pub mod discovery;
 pub mod trust;
-pub mod bridge;
 pub mod transfer;
 pub mod manager;
 pub mod relay;
 pub mod connection_types;
 pub mod handshake;
 pub mod connection;
+
+// QUIC modules (replaces old TCP+TLS bridge)
+pub mod quic_crypto;
+pub mod quic_bridge;
 
 // Re-export core types
 pub use config::{
@@ -54,12 +57,6 @@ pub use trust::{
     get_trust_manager, establish_trust, check_rate_limit, record_failed_attempt,
     add_trusted, remove_trusted, is_device_trusted, get_all_trusted, rename_trusted_device,
 };
-pub use bridge::{
-    BridgeManager, BridgeConnection, BridgeMessage, BridgeEvent, ConnectionState,
-    BridgeServer, get_bridge_manager, connect_to_device, disconnect_from_device, 
-    send_to_device, is_connected_to, get_connected_device_ids,
-    start_bridge_server, stop_bridge_server,
-};
 pub use transfer::{
     TransferManager, FileTransfer, TransferEvent, TransferStatus, TransferDirection,
     get_transfer_manager, send_file, accept_incoming_transfer, reject_incoming_transfer,
@@ -73,11 +70,18 @@ pub use connection_types::{
     DeviceInfo, ConnectionCode, ConnectionResult, ConnectionType, ConnectionError,
 };
 pub use handshake::{
-    HandshakeMessage, send_handshake_client, send_handshake_server,
-    receive_handshake_client, receive_handshake_server,
+    HandshakeMessage,
 };
 pub use connection::{
     ConnectionCoordinator,
+};
+pub use quic_crypto::{
+    QuicCertManager, get_quic_cert_manager, initialize_quic_crypto,
+};
+pub use quic_bridge::{
+    QuicBridgeManager, QuicMessage, QuicBridgeEvent,
+    get_quic_bridge_manager, initialize_quic_bridge,
+    connect_to_device_quic, send_to_device_quic, is_connected_to_quic,
 };
 
 // ============================================================================

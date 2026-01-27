@@ -1,10 +1,6 @@
 // src/file_share/handshake.rs - Bridge Handshake Protocol
 
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
-use tokio_rustls::client::TlsStream as ClientTlsStream;
-use tokio_rustls::server::TlsStream as ServerTlsStream;
 
 use super::config::OperatingSystem;
 
@@ -85,95 +81,8 @@ impl HandshakeMessage {
     }
 }
 
-/// Send a handshake message over a client TLS stream
-pub async fn send_handshake_client(
-    stream: &mut ClientTlsStream<TcpStream>,
-    message: &HandshakeMessage,
-) -> Result<(), std::io::Error> {
-    let bytes = message.to_bytes()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    
-    // Send message length as 4-byte big-endian integer
-    let len = bytes.len() as u32;
-    stream.write_all(&len.to_be_bytes()).await?;
-    
-    // Send message data
-    stream.write_all(&bytes).await?;
-    stream.flush().await?;
-    
-    Ok(())
-}
-
-/// Send a handshake message over a server TLS stream
-pub async fn send_handshake_server(
-    stream: &mut ServerTlsStream<TcpStream>,
-    message: &HandshakeMessage,
-) -> Result<(), std::io::Error> {
-    let bytes = message.to_bytes()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    
-    // Send message length as 4-byte big-endian integer
-    let len = bytes.len() as u32;
-    stream.write_all(&len.to_be_bytes()).await?;
-    
-    // Send message data
-    stream.write_all(&bytes).await?;
-    stream.flush().await?;
-    
-    Ok(())
-}
-
-/// Receive a handshake message from a client TLS stream
-pub async fn receive_handshake_client(
-    stream: &mut ClientTlsStream<TcpStream>,
-) -> Result<HandshakeMessage, std::io::Error> {
-    // Read message length (4 bytes, big-endian)
-    let mut len_bytes = [0u8; 4];
-    stream.read_exact(&mut len_bytes).await?;
-    let len = u32::from_be_bytes(len_bytes) as usize;
-    
-    // Validate message length (max 1MB for safety)
-    if len > 1_048_576 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "Handshake message too large",
-        ));
-    }
-    
-    // Read message data
-    let mut buffer = vec![0u8; len];
-    stream.read_exact(&mut buffer).await?;
-    
-    // Deserialize message
-    HandshakeMessage::from_bytes(&buffer)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-}
-
-/// Receive a handshake message from a server TLS stream
-pub async fn receive_handshake_server(
-    stream: &mut ServerTlsStream<TcpStream>,
-) -> Result<HandshakeMessage, std::io::Error> {
-    // Read message length (4 bytes, big-endian)
-    let mut len_bytes = [0u8; 4];
-    stream.read_exact(&mut len_bytes).await?;
-    let len = u32::from_be_bytes(len_bytes) as usize;
-    
-    // Validate message length (max 1MB for safety)
-    if len > 1_048_576 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "Handshake message too large",
-        ));
-    }
-    
-    // Read message data
-    let mut buffer = vec![0u8; len];
-    stream.read_exact(&mut buffer).await?;
-    
-    // Deserialize message
-    HandshakeMessage::from_bytes(&buffer)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-}
+// NOTE: Handshake messages are now sent over QUIC streams
+// See quic_bridge.rs for the new implementation
 
 #[cfg(test)]
 mod tests {

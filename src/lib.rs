@@ -82,8 +82,9 @@ pub use file_share::{
     start_discovery, stop_discovery, get_discovered_devices,
     TrustManager, TrustResult,
     establish_trust, check_rate_limit, is_device_trusted, get_all_trusted,
-    BridgeManager, BridgeMessage, BridgeEvent, ConnectionState,
-    connect_to_device, disconnect_from_device, send_to_device, is_connected_to,
+    // Re-export QUIC types (replaces old bridge)
+    QuicBridgeManager, QuicMessage, QuicBridgeEvent,
+    connect_to_device_quic, send_to_device_quic, is_connected_to_quic,
     TransferManager, FileTransfer, TransferEvent, TransferStatus,
     send_file, accept_incoming_transfer, cancel_file_transfer, get_transfer_progress,
 };

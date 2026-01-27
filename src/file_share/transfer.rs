@@ -11,7 +11,7 @@ use tokio::sync::broadcast;
 use once_cell::sync::Lazy;
 use uuid::Uuid;
 
-use super::bridge::{BridgeMessage, get_bridge_manager, send_to_device};
+use super::quic_bridge::{QuicMessage, get_quic_bridge_manager, send_to_device_quic};
 
 // Transfer constants
 const CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks
@@ -236,14 +236,19 @@ impl TransferManager {
         let transfer_id = transfer.id.clone();
         
         // Send transfer request
-        let message = BridgeMessage::FileTransferRequest {
+        let message = QuicMessage::FileTransferRequest {
             filename: transfer.filename.clone(),
             size: transfer.size,
             checksum: transfer.checksum.clone(),
             transfer_id: transfer_id.clone(),
         };
         
-        send_to_device(device_id, message)?;
+        // Use tokio runtime to send async QUIC message
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                send_to_device_quic(device_id, message).await
+            })
+        })?;
         
         transfer.status = TransferStatus::Pending;
         self.transfers.insert(transfer_id.clone(), transfer);
@@ -300,10 +305,15 @@ impl TransferManager {
         }
         
         // Send accept message
-        let message = BridgeMessage::FileTransferAccept {
+        let message = QuicMessage::FileTransferAccept {
             transfer_id: transfer_id.to_string(),
         };
-        send_to_device(&transfer.device_id, message)?;
+        
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                send_to_device_quic(&transfer.device_id, message).await
+            })
+        })?;
         
         transfer.status = TransferStatus::InProgress;
         transfer.started_at = Some(Instant::now());
@@ -322,11 +332,16 @@ impl TransferManager {
         let transfer = self.transfers.get_mut(transfer_id)
             .ok_or("Transfer not found")?;
         
-        let message = BridgeMessage::FileTransferReject {
+        let message = QuicMessage::FileTransferReject {
             transfer_id: transfer_id.to_string(),
             reason: reason.to_string(),
         };
-        send_to_device(&transfer.device_id, message)?;
+        
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                send_to_device_quic(&transfer.device_id, message).await
+            })
+        })?;
         
         transfer.status = TransferStatus::Cancelled;
         
@@ -416,14 +431,18 @@ impl TransferManager {
             transferred += bytes_read as u64;
             let is_last = transferred >= size;
             
-            let message = BridgeMessage::FileChunk {
+            let message = QuicMessage::FileChunk {
                 transfer_id: transfer_id_clone.clone(),
                 sequence,
                 data: chunk,
                 is_last,
             };
             
-            send_to_device(&device_id, message)?;
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    send_to_device_quic(&device_id, message).await
+                })
+            })?;
             sequence += 1;
             
             if is_last {

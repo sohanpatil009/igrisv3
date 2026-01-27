@@ -7,7 +7,7 @@ use once_cell::sync::Lazy;
 // Import from parent crate's file_share module
 use crate::file_share::{
     discovery::{start_discovery, get_discovered_devices},
-    bridge::{connect_to_device, disconnect_from_device},
+    quic_bridge::{connect_to_device_quic, is_connected_to_quic},
     trust::get_all_trusted,
     transfer::{
         accept_incoming_transfer, reject_incoming_transfer, 
@@ -179,7 +179,12 @@ async fn handle_connect(device_name: &str) -> Result<String, Box<dyn Error>> {
     match device {
         Some(d) => {
             let label = d.label.clone();
-            connect_to_device(d)?;
+            let device_clone = d.clone();
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    connect_to_device_quic(&device_clone).await
+                })
+            })?;
             Ok(format!("Connecting to {}...", label))
         }
         None => {
@@ -206,7 +211,19 @@ fn handle_disconnect(device_name: &str) -> Result<String, Box<dyn Error>> {
     match device {
         Some(d) => {
             let label = d.label.clone();
-            disconnect_from_device(&d.id)?;
+            let device_id = d.id.clone();
+            
+            // Disconnect via QUIC
+            let manager_lock = crate::file_share::quic_bridge::get_quic_bridge_manager()
+                .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)) as Box<dyn Error>)?;
+            let mut manager = manager_lock.lock()
+                .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, format!("Lock error: {}", e))) as Box<dyn Error>)?;
+            
+            if let Some(ref mut mgr) = *manager {
+                mgr.disconnect(&device_id, "User requested disconnect")
+                    .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)) as Box<dyn Error>)?;
+            }
+            
             Ok(format!("Disconnected from {}.", label))
         }
         None => {

@@ -553,11 +553,9 @@ pub async fn start_discovery() -> Result<(), String> {
     if let Some(ref svc) = *service {
         svc.start().await?;
         
-        // Start bridge server to accept incoming connections
-        println!("[Discovery] Starting bridge server...");
-        let coordinator = super::connection::get_connection_coordinator()?;
-        super::bridge::start_bridge_server(coordinator).await?;
-        println!("[Discovery] Bridge server started");
+        // QUIC bridge is already initialized in manager.rs
+        // No separate server needed - QUIC endpoint handles both client and server
+        println!("[Discovery] QUIC bridge ready for connections");
         
         Ok(())
     } else {

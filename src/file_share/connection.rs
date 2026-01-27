@@ -130,52 +130,44 @@ impl ConnectionCoordinator {
             cert_fingerprint.clone(),
         );
         
-        // Establish TLS connection to remote device
-        let connection_result = self.establish_tls_connection(
+        // Establish QUIC connection to remote device and perform handshake
+        let response = self.establish_quic_connection_with_handshake(
             ip_address,
             bridge_port,
             handshake_msg,
-        ).await;
+        ).await?;
         
-        match connection_result {
-            Ok(response) => {
-                // Parse the response to get the real device_id
-                let (real_device_id, remote_cert_fingerprint) = match &response {
-                    super::handshake::HandshakeMessage::ResponderAck {
-                        device_id,
-                        cert_fingerprint,
-                        ..
-                    } => (device_id.clone(), cert_fingerprint.clone()),
-                    _ => {
-                        return Err(ConnectionError::TrustFailed("Invalid handshake response".to_string()));
-                    }
-                };
-                
-                println!("[ConnectionCoordinator] Received device_id from remote: {}", &real_device_id[..8]);
-                
-                // Create registration with the real device_id
-                let registration = super::relay::DeviceRegistration {
-                    code: "DIRECT".to_string(),
-                    device_id: real_device_id.clone(),
-                    ip_address: ip_address.to_string(),
-                    bridge_port,
-                    hostname: device_label.to_string(),
-                    label: device_label.to_string(),
-                    os: super::config::OperatingSystem::Unknown,
-                    created_at: std::time::Instant::now(),
-                };
-                
-                // Add device to discovery cache
-                let discovered_device = self.add_to_discovery_cache(&registration).await?;
-                
-                // Continue to trust establishment
-                self.connect_with_code_part3(registration, discovered_device, response, cert_fingerprint).await
+        // Parse the response to get the real device_id
+        let (real_device_id, remote_cert_fingerprint) = match &response {
+            super::handshake::HandshakeMessage::ResponderAck {
+                device_id,
+                cert_fingerprint,
+                ..
+            } => (device_id.clone(), cert_fingerprint.clone()),
+            _ => {
+                return Err(ConnectionError::TrustFailed("Invalid handshake response".to_string()));
             }
-            Err(e) => {
-                println!("[ConnectionCoordinator] Direct connection failed: {}", e);
-                Err(e)
-            }
-        }
+        };
+        
+        println!("[ConnectionCoordinator] Received device_id from remote: {}", &real_device_id[..8]);
+        
+        // Create registration with the real device_id
+        let registration = super::relay::DeviceRegistration {
+            code: "DIRECT".to_string(),
+            device_id: real_device_id.clone(),
+            ip_address: ip_address.to_string(),
+            bridge_port,
+            hostname: device_label.to_string(),
+            label: device_label.to_string(),
+            os: super::config::OperatingSystem::Unknown,
+            created_at: std::time::Instant::now(),
+        };
+        
+        // Add device to discovery cache
+        let discovered_device = self.add_to_discovery_cache(&registration).await?;
+        
+        // Continue to trust establishment
+        self.connect_with_code_part3(registration, discovered_device, response, cert_fingerprint).await
     }
     /// Connect to a device using their 4-digit code
     /// This method performs the complete connection flow:
@@ -308,76 +300,85 @@ impl ConnectionCoordinator {
             cert_fingerprint.clone(),
         );
         
-        // Establish TLS connection to remote device
-        let connection_result = self.establish_tls_connection(
+        // Establish QUIC connection to remote device and perform handshake
+        let response = self.establish_quic_connection_with_handshake(
             &registration.ip_address,
             registration.bridge_port,
             handshake_msg,
-        ).await;
+        ).await?;
         
-        match connection_result {
-            Ok(response) => {
-                // Continue to Part 3: Trust establishment
-                self.connect_with_code_part3(registration, discovered_device, response, cert_fingerprint).await
-            }
-            Err(e) => {
-                // Record failed attempt for rate limiting
-                let mut trust_manager = self.trust.lock()
-                    .map_err(|e| ConnectionError::NetworkError(format!("Lock error: {}", e)))?;
-                trust_manager.record_failed_attempt(&registration.device_id);
-                
-                Err(e)
-            }
-        }
+        // Continue to Part 3: Trust establishment
+        self.connect_with_code_part3(registration, discovered_device, response, cert_fingerprint).await
     }
     
-    /// Establish TLS connection and send/receive handshake
-    async fn establish_tls_connection(
+    /// Establish QUIC connection and perform handshake
+    async fn establish_quic_connection_with_handshake(
         &self,
         ip_address: &str,
         port: u16,
         handshake_msg: super::handshake::HandshakeMessage,
     ) -> Result<super::handshake::HandshakeMessage, ConnectionError> {
-        use tokio::net::TcpStream;
-        use tokio_rustls::TlsConnector;
-        use rustls::ClientConfig;
-        use std::sync::Arc as StdArc;
+        use super::quic_bridge::get_quic_bridge_manager;
         
-        // Create TLS client config that accepts self-signed certificates
-        let root_store = rustls::RootCertStore::empty();
-        let mut config = ClientConfig::builder()
-            .with_root_certificates(root_store)
-            .with_no_client_auth();
+        let manager_lock = get_quic_bridge_manager()
+            .map_err(|e| ConnectionError::NetworkError(e))?;
         
-        // Disable certificate verification for self-signed certs
-        config.dangerous().set_certificate_verifier(
-            StdArc::new(super::crypto::NoCertificateVerification)
-        );
+        let mut manager = manager_lock.lock()
+            .map_err(|e| ConnectionError::NetworkError(format!("Lock error: {}", e)))?;
         
-        let connector = TlsConnector::from(StdArc::new(config));
+        let mgr = manager.as_mut()
+            .ok_or_else(|| ConnectionError::NetworkError("QUIC bridge not initialized".to_string()))?;
         
-        // Connect to remote device
-        let addr = format!("{}:{}", ip_address, port);
-        let stream = TcpStream::connect(&addr).await
-            .map_err(|e| ConnectionError::NetworkError(format!("TCP connection failed: {}", e)))?;
+        // Create temporary device for connection
+        let temp_device = super::discovery::DiscoveredDevice {
+            id: format!("temp_{}", ip_address.replace(".", "_")),
+            hostname: ip_address.to_string(),
+            label: ip_address.to_string(),
+            os: super::config::OperatingSystem::Unknown,
+            ip_address: ip_address.parse()
+                .map_err(|e| ConnectionError::NetworkError(format!("Invalid IP: {}", e)))?,
+            bridge_port: port,
+            last_seen: std::time::Instant::now(),
+            is_trusted: false,
+            code: None,
+        };
         
-        // Perform TLS handshake
-        let domain = rustls::pki_types::ServerName::try_from("localhost")
-            .map_err(|e| ConnectionError::NetworkError(format!("Invalid server name: {}", e)))?
-            .to_owned();
+        // Connect via QUIC (TLS 1.3 automatic!)
+        mgr.connect(&temp_device).await
+            .map_err(|e| ConnectionError::NetworkError(e))?;
         
-        let mut tls_stream = connector.connect(domain, stream).await
-            .map_err(|e| ConnectionError::NetworkError(format!("TLS handshake failed: {}", e)))?;
+        // Send handshake message over QUIC stream
+        let handshake_bytes = serde_json::to_vec(&handshake_msg)
+            .map_err(|e| ConnectionError::NetworkError(format!("Serialize error: {}", e)))?;
         
-        // Send initiator hello
-        super::handshake::send_handshake_client(&mut tls_stream, &handshake_msg).await
-            .map_err(|e| ConnectionError::NetworkError(format!("Failed to send handshake: {}", e)))?;
+        let conn = mgr.connections.get(&temp_device.id)
+            .ok_or_else(|| ConnectionError::NetworkError("Connection not found".to_string()))?;
+        
+        let (mut send, mut recv) = conn.connection.open_bi().await
+            .map_err(|e| ConnectionError::NetworkError(format!("Failed to open stream: {}", e)))?;
+        
+        // Send handshake
+        let len = handshake_bytes.len() as u32;
+        send.write_all(&len.to_be_bytes()).await
+            .map_err(|e| ConnectionError::NetworkError(format!("Failed to send length: {}", e)))?;
+        send.write_all(&handshake_bytes).await
+            .map_err(|e| ConnectionError::NetworkError(format!("Failed to send: {}", e)))?;
+        send.finish()
+            .map_err(|e| ConnectionError::NetworkError(format!("Failed to finish: {}", e)))?;
         
         println!("[ConnectionCoordinator] Handshake sent, waiting for response...");
         
-        // Receive responder ack
-        let response = super::handshake::receive_handshake_client(&mut tls_stream).await
-            .map_err(|e| ConnectionError::NetworkError(format!("Failed to receive handshake: {}", e)))?;
+        // Receive response
+        let mut len_buf = [0u8; 4];
+        recv.read_exact(&mut len_buf).await
+            .map_err(|e| ConnectionError::NetworkError(format!("Failed to read length: {}", e)))?;
+        let len = u32::from_be_bytes(len_buf) as usize;
+        
+        let response_bytes = recv.read_to_end(len).await
+            .map_err(|e| ConnectionError::NetworkError(format!("Failed to receive: {}", e)))?;
+        
+        let response: super::handshake::HandshakeMessage = serde_json::from_slice(&response_bytes)
+            .map_err(|e| ConnectionError::NetworkError(format!("Deserialize error: {}", e)))?;
         
         println!("[ConnectionCoordinator] Handshake response received");
         
@@ -431,10 +432,10 @@ impl ConnectionCoordinator {
                 
                 drop(trust_manager); // Release lock
                 
-                // CRITICAL FIX: Add device to BridgeManager so UI shows as connected
-                println!("[ConnectionCoordinator] Adding device to BridgeManager...");
-                if let Err(e) = super::bridge::connect_to_device(&discovered_device) {
-                    println!("[ConnectionCoordinator] Warning: Failed to add to BridgeManager: {}", e);
+                // CRITICAL FIX: Add device to QUIC BridgeManager so UI shows as connected
+                println!("[ConnectionCoordinator] Adding device to QUIC BridgeManager...");
+                if let Err(e) = super::quic_bridge::connect_to_device_quic(&discovered_device).await {
+                    println!("[ConnectionCoordinator] Warning: Failed to add to QUIC BridgeManager: {}", e);
                     // Don't fail the connection - trust is already established
                 }
                 
@@ -537,11 +538,11 @@ impl ConnectionCoordinator {
             }
         };
         
-        // CRITICAL FIX: Add device to BridgeManager so Windows UI shows as connected
+        // CRITICAL FIX: Add device to QUIC BridgeManager so Windows UI shows as connected
         if let Some(ref device) = discovered_device {
-            println!("[ConnectionCoordinator] Adding initiator to BridgeManager...");
-            if let Err(e) = super::bridge::connect_to_device(device) {
-                println!("[ConnectionCoordinator] Warning: Failed to add to BridgeManager: {}", e);
+            println!("[ConnectionCoordinator] Adding initiator to QUIC BridgeManager...");
+            if let Err(e) = super::quic_bridge::connect_to_device_quic(device).await {
+                println!("[ConnectionCoordinator] Warning: Failed to add to QUIC BridgeManager: {}", e);
                 // Don't fail the connection - trust is already established
             }
         }

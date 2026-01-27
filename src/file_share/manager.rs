@@ -17,10 +17,10 @@ use super::trust::{
     get_trust_manager, establish_trust, check_rate_limit,
     add_trusted, remove_trusted, is_device_trusted, get_all_trusted,
 };
-use super::bridge::{
-    BridgeManager, BridgeMessage, BridgeEvent, ConnectionState,
-    get_bridge_manager, connect_to_device, disconnect_from_device,
-    send_to_device, is_connected_to, get_connected_device_ids,
+use super::quic_bridge::{
+    is_connected_to_quic as is_connected_to,
+    connect_to_device_quic,
+    send_to_device_quic,
 };
 use super::transfer::{
     TransferManager, FileTransfer, TransferEvent, TransferStatus,
@@ -115,11 +115,16 @@ impl FileShareManager {
         self.device_identity = Some(get_or_create_device_identity()?);
         println!("[FileShare] Device identity ready");
         
-        // Step 2: Initialize TLS certificate
-        initialize_certificate()?;
-        println!("[FileShare] TLS certificate ready");
+        // Step 2: Initialize QUIC certificate (replaces old TLS)
+        super::quic_crypto::initialize_quic_crypto()?;
+        println!("[FileShare] QUIC certificate ready");
         
-        // Step 3: Services are lazy-initialized, just verify they're accessible
+        // Step 3: Initialize QUIC bridge (replaces old TCP bridge)
+        let config = super::config::load_config()?;
+        super::quic_bridge::initialize_quic_bridge(config.bridge_port).await?;
+        println!("[FileShare] QUIC bridge ready");
+        
+        // Step 4: Other services
         let _ = get_trust_manager();
         println!("[FileShare] Trust manager ready");
         
@@ -236,7 +241,13 @@ impl FileShareManager {
             return Ok(());
         }
         
-        connect_to_device(device)?;
+        // Use async runtime to connect via QUIC
+        let device_clone = device.clone();
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                connect_to_device_quic(&device_clone).await
+            })
+        })?;
         
         let _ = self.event_tx.send(FileShareEvent::Connected {
             device_id: device.id.clone(),
@@ -248,7 +259,14 @@ impl FileShareManager {
     
     /// Disconnect from a device
     pub fn disconnect(&self, device_id: &str, reason: &str) -> Result<(), String> {
-        disconnect_from_device(device_id)?;
+        // QUIC connections are managed by QuicBridgeManager
+        let manager_lock = super::quic_bridge::get_quic_bridge_manager()?;
+        let mut manager = manager_lock.lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        
+        if let Some(ref mut mgr) = *manager {
+            mgr.disconnect(device_id, reason)?;
+        }
         
         let _ = self.event_tx.send(FileShareEvent::Disconnected {
             device_id: device_id.to_string(),
@@ -265,7 +283,15 @@ impl FileShareManager {
     
     /// Get all connected device IDs
     pub fn get_connected_devices(&self) -> Result<Vec<String>, String> {
-        get_connected_device_ids()
+        let manager_lock = super::quic_bridge::get_quic_bridge_manager()?;
+        let manager = manager_lock.lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        
+        if let Some(ref mgr) = *manager {
+            Ok(mgr.get_connected_devices())
+        } else {
+            Ok(Vec::new())
+        }
     }
 
     
@@ -362,10 +388,15 @@ impl FileShareManager {
         // Stop discovery
         let _ = stop_discovery();
         
-        // Disconnect all devices
-        if let Ok(connected) = get_connected_device_ids() {
-            for device_id in connected {
-                let _ = disconnect_from_device(&device_id);
+        // Disconnect all devices via QUIC
+        if let Ok(manager_lock) = super::quic_bridge::get_quic_bridge_manager() {
+            if let Ok(mut manager) = manager_lock.lock() {
+                if let Some(ref mut mgr) = *manager {
+                    let connected = mgr.get_connected_devices();
+                    for device_id in connected {
+                        let _ = mgr.disconnect(&device_id, "Shutdown");
+                    }
+                }
             }
         }
         

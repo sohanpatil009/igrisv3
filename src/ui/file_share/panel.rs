@@ -474,7 +474,11 @@ async fn connect_to_device_async(device_id: &str) -> Result<(), String> {
     let devices = crate::file_share::discovery::get_discovered_devices()?;
     let device = devices.iter().find(|d| d.id == device_id)
         .ok_or_else(|| "Device not found".to_string())?;
-    crate::file_share::bridge::connect_to_device(device)
+    tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(async {
+            crate::file_share::connect_to_device_quic(device).await
+        })
+    })
 }
 
 // NOTE: This function is deprecated and will be replaced by ConnectionCoordinator
