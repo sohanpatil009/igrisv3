@@ -86,6 +86,10 @@ path = "src/lib.rs"
 name = "igrisv3"
 path = "src/main.rs"
 
+[[bin]]
+name = "relay_server"
+path = "src/bin/relay_server.rs"
+
 # Asset embedding
 [package.metadata.dioxus]
 web = { assets = "assets" }

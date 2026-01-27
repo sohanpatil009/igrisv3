@@ -193,20 +193,130 @@ impl ConnectionCoordinator {
     
     /// Internal method for relay connection (when direct fails due to AP isolation)
     async fn connect_via_relay_internal(&self, ip_address: &str, bridge_port: u16, device_label: &str) -> Result<ConnectionResult, ConnectionError> {
-        // For now, return a helpful error message
-        // Full relay implementation requires a relay server
-        Err(ConnectionError::NetworkError(
-            format!(
-                "Direct connection failed due to network restrictions (likely AP isolation on mobile hotspot).\n\
-                \n\
-                Solutions:\n\
-                1. Use Mac Personal Hotspot instead (allows P2P)\n\
-                2. Connect both devices to a WiFi router\n\
-                3. Use direct Ethernet/USB connection\n\
-                \n\
-                Relay server support coming soon!"
-            )
-        ))
+        println!("[ConnectionCoordinator] Attempting relay connection...");
+        
+        // Get local device info
+        let config = load_config()
+            .map_err(|e| ConnectionError::NetworkError(format!("Failed to load config: {}", e)))?;
+        
+        // Get relay server address
+        let relay_address = super::quic_relay::get_default_relay_address();
+        println!("[ConnectionCoordinator] Using relay server: {}", relay_address);
+        
+        // Create temporary device ID for remote (we'll get real one from handshake)
+        let temp_remote_id = format!("temp_{}", ip_address.replace(".", "_"));
+        
+        // Connect to relay server
+        let relay_conn = super::quic_relay::connect_via_relay(
+            &config.identity.id,
+            &temp_remote_id,
+            &relay_address,
+        ).await.map_err(|e| ConnectionError::NetworkError(format!("Relay connection failed: {}", e)))?;
+        
+        println!("[ConnectionCoordinator] ✓ Connected to relay server");
+        
+        // Get local certificate fingerprint
+        let cert_manager_lock = super::quic_crypto::get_quic_cert_manager()
+            .map_err(|e| ConnectionError::NetworkError(format!("Failed to get cert manager: {}", e)))?;
+        let cert_manager = cert_manager_lock.lock()
+            .map_err(|e| ConnectionError::NetworkError(format!("Lock error: {}", e)))?;
+        let cert_mgr = cert_manager.as_ref()
+            .ok_or_else(|| ConnectionError::NetworkError("Certificate manager not initialized".to_string()))?;
+        let cert_fingerprint = cert_mgr.fingerprint().to_string();
+        
+        // Get local IP address
+        let local_ip = self.get_local_ip_address()
+            .unwrap_or_else(|| "127.0.0.1".to_string());
+        
+        // Create handshake message
+        let handshake_msg = super::handshake::HandshakeMessage::initiator_hello(
+            config.identity.id.clone(),
+            config.identity.hostname.clone(),
+            config.identity.label.clone(),
+            config.identity.os.clone(),
+            local_ip,
+            config.bridge_port,
+            cert_fingerprint.clone(),
+        );
+        
+        // Send handshake through relay
+        let (mut send, mut recv) = relay_conn.open_bi().await
+            .map_err(|e| ConnectionError::NetworkError(format!("Failed to open stream: {}", e)))?;
+        
+        let handshake_bytes = serde_json::to_vec(&handshake_msg)
+            .map_err(|e| ConnectionError::NetworkError(format!("Serialize error: {}", e)))?;
+        
+        let len = handshake_bytes.len() as u32;
+        send.write_all(&len.to_be_bytes()).await
+            .map_err(|e| ConnectionError::NetworkError(format!("Failed to send length: {}", e)))?;
+        send.write_all(&handshake_bytes).await
+            .map_err(|e| ConnectionError::NetworkError(format!("Failed to send handshake: {}", e)))?;
+        send.finish()
+            .map_err(|e| ConnectionError::NetworkError(format!("Failed to finish: {}", e)))?;
+        
+        // Receive response through relay
+        let mut len_buf = [0u8; 4];
+        recv.read_exact(&mut len_buf).await
+            .map_err(|e| ConnectionError::NetworkError(format!("Failed to read response length: {}", e)))?;
+        let len = u32::from_be_bytes(len_buf) as usize;
+        
+        let response_bytes = recv.read_to_end(len).await
+            .map_err(|e| ConnectionError::NetworkError(format!("Failed to read response: {}", e)))?;
+        
+        let response: super::handshake::HandshakeMessage = serde_json::from_slice(&response_bytes)
+            .map_err(|e| ConnectionError::NetworkError(format!("Deserialize error: {}", e)))?;
+        
+        // Parse response to get real device_id
+        let (real_device_id, remote_cert_fingerprint) = match &response {
+            super::handshake::HandshakeMessage::ResponderAck {
+                device_id,
+                cert_fingerprint,
+                ..
+            } => (device_id.clone(), cert_fingerprint.clone()),
+            _ => {
+                return Err(ConnectionError::TrustFailed("Invalid handshake response".to_string()));
+            }
+        };
+        
+        println!("[ConnectionCoordinator] ✓ Handshake complete via relay");
+        
+        // Create registration with real device_id
+        let registration = super::relay::DeviceRegistration {
+            code: "RELAY".to_string(),
+            device_id: real_device_id.clone(),
+            ip_address: ip_address.to_string(),
+            bridge_port,
+            hostname: device_label.to_string(),
+            label: device_label.to_string(),
+            os: super::config::OperatingSystem::Unknown,
+            created_at: std::time::Instant::now(),
+        };
+        
+        // Add device to discovery cache
+        let discovered_device = self.add_to_discovery_cache(&registration).await?;
+        
+        // Store relay connection in QUIC bridge
+        if let Ok(manager_lock) = super::quic_bridge::get_quic_bridge_manager() {
+            if let Ok(mut manager) = manager_lock.lock() {
+                if let Some(ref mut mgr) = *manager {
+                    // Store relay connection
+                    mgr.connections.insert(
+                        discovered_device.id.clone(),
+                        super::quic_bridge::QuicBridgeConnection {
+                            connection: relay_conn,
+                            device_id: real_device_id.clone(),
+                            device_label: device_label.to_string(),
+                            state: super::quic_bridge::ConnectionState::Connected,
+                            connected_at: std::time::Instant::now(),
+                        },
+                    );
+                    println!("[ConnectionCoordinator] ✓ Relay connection stored in bridge");
+                }
+            }
+        }
+        
+        // Continue to trust establishment
+        self.connect_with_code_part3(registration, discovered_device, response, cert_fingerprint).await
     }
     /// Connect to a device using their 4-digit code
     /// This method performs the complete connection flow:

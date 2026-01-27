@@ -98,7 +98,7 @@ pub async fn connect_via_relay(
     local_device_id: &str,
     remote_device_id: &str,
     relay_address: &str,
-) -> Result<Connection, String> {
+) -> Result<quinn::Connection, String> {
     println!("[QuicRelay] Connecting to relay server at {}", relay_address);
     
     // Parse relay address
@@ -158,9 +158,16 @@ pub async fn connect_via_relay(
         return Err(format!("Relay registration failed: {:?}", ack));
     }
     
-    println!("[QuicRelay] Registered with relay server");
+    println!("[QuicRelay] ✓ Registered with relay: {}", ack["message"].as_str().unwrap_or(""));
     
     Ok(connection)
+}
+
+/// Get default relay server address
+pub fn get_default_relay_address() -> String {
+    // You can change this to your relay server
+    // For now, use localhost for testing
+    "127.0.0.1:45680".to_string()
 }
 
 /// Check if we should use relay (detect AP isolation)

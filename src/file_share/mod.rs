@@ -39,6 +39,7 @@ pub mod connection;
 pub mod quic_crypto;
 pub mod quic_bridge;
 pub mod quic_relay;
+pub mod relay_server;
 
 // Re-export core types
 pub use config::{
