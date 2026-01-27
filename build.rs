@@ -5,8 +5,9 @@ fn main() {
     println!("cargo:rerun-if-changed=icons/");
     println!("cargo:rerun-if-changed=assets/");
     println!("cargo:rerun-if-changed=igrisv3.rc");
+    println!("cargo:rerun-if-changed=igrisv3.exe.manifest");
 
-    // For Windows, embed the icon resource
+    // For Windows, embed the icon resource (which now includes manifest)
     #[cfg(target_os = "windows")]
     {
         let rc_path = Path::new("igrisv3.rc");
