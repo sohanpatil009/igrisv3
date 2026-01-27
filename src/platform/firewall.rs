@@ -71,12 +71,62 @@ fn request_macos_firewall_permission() -> Result<(), String> {
         }
     }
     
-    println!("[Firewall] Requesting firewall permission...");
-    println!("[Firewall] macOS will show a permission dialog when you first use File Share");
-    println!("[Firewall] Please click 'Allow' when prompted");
+    println!("[Firewall] App not in firewall - attempting to add...");
     
-    // The permission dialog will appear automatically when we bind to the UDP port
-    // We don't need to manually trigger it - macOS handles this
+    // Try to add app to firewall (requires sudo)
+    let add_result = Command::new("sudo")
+        .arg("/usr/libexec/ApplicationFirewall/socketfilterfw")
+        .arg("--add")
+        .arg(&exe_path)
+        .output();
+    
+    match add_result {
+        Ok(output) => {
+            if output.status.success() {
+                println!("[Firewall] ✓ App added to firewall");
+                
+                // Unblock the app to allow incoming connections
+                let unblock_result = Command::new("sudo")
+                    .arg("/usr/libexec/ApplicationFirewall/socketfilterfw")
+                    .arg("--unblockapp")
+                    .arg(&exe_path)
+                    .output();
+                
+                match unblock_result {
+                    Ok(unblock_output) => {
+                        if unblock_output.status.success() {
+                            println!("[Firewall] ✓ App allowed for incoming connections");
+                            println!("[Firewall] Firewall configured successfully!");
+                            return Ok(());
+                        } else {
+                            let error = String::from_utf8_lossy(&unblock_output.stderr);
+                            println!("[Firewall] Failed to unblock app: {}", error);
+                        }
+                    }
+                    Err(e) => {
+                        println!("[Firewall] Error unblocking app: {}", e);
+                    }
+                }
+            } else {
+                let error = String::from_utf8_lossy(&output.stderr);
+                println!("[Firewall] Failed to add app: {}", error);
+            }
+        }
+        Err(e) => {
+            println!("[Firewall] Error adding app: {}", e);
+        }
+    }
+    
+    // If automatic setup failed, show manual instructions
+    println!("[Firewall] ⚠️  Automatic firewall setup requires sudo privileges");
+    println!("[Firewall] Please add IGRIS manually:");
+    println!("[Firewall]   1. System Settings → Network → Firewall → Options");
+    println!("[Firewall]   2. Click + and add: {:?}", exe_path);
+    println!("[Firewall]   3. Set to 'Allow incoming connections'");
+    println!();
+    println!("[Firewall] Or run this command:");
+    println!("[Firewall]   sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add {:?}", exe_path);
+    println!("[Firewall]   sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp {:?}", exe_path);
     
     Ok(())
 }
