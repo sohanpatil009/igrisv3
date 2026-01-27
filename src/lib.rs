@@ -38,9 +38,6 @@ pub mod setup_manager;
 // Media capture (camera, video)
 pub mod media;
 
-// File Share & Device Discovery
-pub mod file_share;
-
 // Global state for search results UI (shared across modules)
 #[derive(Clone, Debug, Default)]
 pub struct SearchState {
@@ -74,17 +71,4 @@ pub use utils::{hotkey, greetings, shared_memory};
 pub use ui::{SettingsPanel, SettingsButton};
 pub use media::{CameraDevice, open_camera, close_camera, take_photo, start_recording, stop_recording, list_cameras};
 
-// File Share exports
-pub use file_share::{
-    DeviceConfig, DeviceIdentity, TrustedDevice, OperatingSystem,
-    CertificateManager, DeviceCertificate,
-    DiscoveryService, DiscoveredDevice, DiscoveryEvent,
-    start_discovery, stop_discovery, get_discovered_devices,
-    TrustManager, TrustResult,
-    establish_trust, check_rate_limit, is_device_trusted, get_all_trusted,
-    // Re-export QUIC types (replaces old bridge)
-    QuicBridgeManager, QuicMessage, QuicBridgeEvent,
-    connect_to_device_quic, send_to_device_quic, is_connected_to_quic,
-    TransferManager, FileTransfer, TransferEvent, TransferStatus,
-    send_file, accept_incoming_transfer, cancel_file_transfer, get_transfer_progress,
-};
+

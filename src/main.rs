@@ -20,7 +20,6 @@ mod platform;
 mod platform_utils;
 mod setup_manager;
 mod media;
-mod file_share;
 
 use dioxus::desktop::{Config, WindowBuilder};
 use core::audio_capture::{capture_audio_vad, CaptureConfig};
@@ -47,8 +46,6 @@ use igrisv3::{SearchState, SearchResultData, SEARCH_STATE};
 // Camera panel state - use directly from commands module (not from igrisv3 crate)
 use commands::ffmpeg_camera::{CameraPanelState, CAMERA_PANEL_STATE};
 
-// File share panel state - use directly from commands module
-use commands::file_share::FILE_SHARE_PANEL_STATE;
 
 #[derive(Clone, Debug)]
 struct AssistantState {
@@ -233,30 +230,6 @@ async fn run_setup_and_assistant() {
                         LogLevel::Success,
                     ));
                     
-                    // macOS Firewall Check after setup completion
-                    #[cfg(target_os = "macos")]
-                    {
-                        use platform::{check_and_prompt_firewall, show_firewall_help};
-                        
-                        println!("\n[Firewall] Checking macOS firewall configuration...");
-                        match check_and_prompt_firewall() {
-                            Ok(_) => {
-                                println!("[Firewall] ✅ Ready for file sharing");
-                                state.logs.push((
-                                    "Firewall configured for file sharing".to_string(),
-                                    LogLevel::Success,
-                                ));
-                            }
-                            Err(_) => {
-                                show_firewall_help();
-                                println!("[Firewall] ⚠️  File sharing may not work until firewall is configured");
-                                state.logs.push((
-                                    "Firewall setup required for file sharing".to_string(),
-                                    LogLevel::Warning,
-                                ));
-                            }
-                        }
-                    }
                 }
                 Err(e) => {
                     let mut state = ASSISTANT_STATE.lock().unwrap();
@@ -309,17 +282,6 @@ async fn start_voice_assistant() {
             &format!("TTS engine init warning: {}", e),
             LogLevel::Warning,
         );
-    }
-
-    // Initialize File Share system for device discovery and file transfer
-    add_log("Initializing File Share system...", LogLevel::Info);
-    match file_share::manager::initialize_file_share().await {
-        Ok(_) => {
-            add_log("File Share system ready", LogLevel::Success);
-        }
-        Err(e) => {
-            add_log(&format!("File Share init warning: {}", e), LogLevel::Warning);
-        }
     }
 
     // Initialize app monitoring (now handled by plugin system)
@@ -567,53 +529,6 @@ async fn process_voice_command(
         
         match plugins::execute_plugin_command(&plugin_result) {
             Ok(response) => {
-                // Check if this is a file share command
-                if response.starts_with("FILE_SHARE:") {
-                    let action = response.strip_prefix("FILE_SHARE:").unwrap_or("");
-                    add_log(&format!("File Share action: {}", action), LogLevel::Info);
-                    
-                    // Extract device name from command if present
-                    let mut params = std::collections::HashMap::new();
-                    let cmd_lower = command_to_use.to_lowercase();
-                    
-                    // Try to extract device name from patterns like "connect to laptop"
-                    for keyword in ["to ", "with ", "from "] {
-                        if let Some(pos) = cmd_lower.find(keyword) {
-                            let device = cmd_lower[pos + keyword.len()..].trim().to_string();
-                            if !device.is_empty() {
-                                params.insert("device".to_string(), device);
-                                break;
-                            }
-                        }
-                    }
-                    
-                    // Handle file share command
-                    match commands::file_share::handle_file_share_command(action, &params).await {
-                        Ok(msg) => {
-                            add_log(&msg, LogLevel::Success);
-                            let _ = core::tts::speak(&msg);
-                            
-                            nlu::context::add_to_context(
-                                command.to_string(),
-                                msg.clone(),
-                                "file_share".to_string(),
-                                vec![action.to_string()],
-                            );
-                        }
-                        Err(e) => {
-                            let error_msg = format!("File share error: {}", e);
-                            add_log(&error_msg, LogLevel::Error);
-                            let _ = core::tts::speak(&error_msg);
-                        }
-                    }
-                    
-                    // Update UI panel state based on action
-                    // Note: We need to access the signal from the App component
-                    // This will be handled by a global state similar to CAMERA_PANEL_STATE
-                    
-                    return Ok(false);
-                }
-                
                 // Check if this is a custom function (file operations, etc.)
                 if response.starts_with("CUSTOM_FN:") {
                     let action = response.strip_prefix("CUSTOM_FN:").unwrap_or("");
@@ -1146,9 +1061,6 @@ fn App() -> Element {
     let mut search_query = use_signal(|| String::new());
     let mut is_searching = use_signal(|| false);
     
-    // File Share Panel state
-    let mut file_share_panel_state = use_signal(|| ui::file_share::FileSharePanelState::Hidden);
-    
     // Camera panel state
     let mut show_camera_panel = use_signal(|| false);
 
@@ -1207,15 +1119,6 @@ fn App() -> Element {
                         println!("[UI] Camera panel state changed: {}", is_open);
                     }
                     show_camera_panel.set(is_open);
-                }
-                
-                // Update file share panel state from global
-                if let Ok(fs_state) = FILE_SHARE_PANEL_STATE.lock() {
-                    let current_state = fs_state.clone();
-                    if current_state != file_share_panel_state() {
-                        println!("[UI] File share panel state changed: {:?}", current_state);
-                        file_share_panel_state.set(current_state);
-                    }
                 }
             }
         });
@@ -1303,10 +1206,6 @@ fn App() -> Element {
             }
         }
 
-        // File Share Panel (modal)
-        ui::file_share::FileSharePanel {
-            panel_state: file_share_panel_state,
-        }
 
         // Presentation Panel (full screen overlay with TTS narration)
         PresentationPanel {}
