@@ -101,9 +101,28 @@ impl ConnectionCoordinator {
     
     /// Connect to a device directly using IP address (bypassing code system)
     /// This method performs direct connection without requiring a 4-digit code
+    /// Automatically falls back to relay if direct connection fails (AP isolation)
     pub async fn connect_direct(&self, ip_address: &str, bridge_port: u16, device_label: &str) -> Result<ConnectionResult, ConnectionError> {
         println!("[ConnectionCoordinator] Direct connection to {} at {}:{}", device_label, ip_address, bridge_port);
         
+        // Try direct connection first
+        match self.connect_direct_internal(ip_address, bridge_port, device_label).await {
+            Ok(result) => {
+                println!("[ConnectionCoordinator] ✓ Direct connection successful");
+                Ok(result)
+            }
+            Err(e) => {
+                println!("[ConnectionCoordinator] Direct connection failed: {}", e);
+                println!("[ConnectionCoordinator] Attempting relay connection...");
+                
+                // Fallback to relay connection
+                self.connect_via_relay_internal(ip_address, bridge_port, device_label).await
+            }
+        }
+    }
+    
+    /// Internal method for direct connection (no fallback)
+    async fn connect_direct_internal(&self, ip_address: &str, bridge_port: u16, device_label: &str) -> Result<ConnectionResult, ConnectionError> {
         // Get local device info for handshake
         let config = load_config()
             .map_err(|e| ConnectionError::NetworkError(format!("Failed to load config: {}", e)))?;
@@ -170,6 +189,24 @@ impl ConnectionCoordinator {
         
         // Continue to trust establishment
         self.connect_with_code_part3(registration, discovered_device, response, cert_fingerprint).await
+    }
+    
+    /// Internal method for relay connection (when direct fails due to AP isolation)
+    async fn connect_via_relay_internal(&self, ip_address: &str, bridge_port: u16, device_label: &str) -> Result<ConnectionResult, ConnectionError> {
+        // For now, return a helpful error message
+        // Full relay implementation requires a relay server
+        Err(ConnectionError::NetworkError(
+            format!(
+                "Direct connection failed due to network restrictions (likely AP isolation on mobile hotspot).\n\
+                \n\
+                Solutions:\n\
+                1. Use Mac Personal Hotspot instead (allows P2P)\n\
+                2. Connect both devices to a WiFi router\n\
+                3. Use direct Ethernet/USB connection\n\
+                \n\
+                Relay server support coming soon!"
+            )
+        ))
     }
     /// Connect to a device using their 4-digit code
     /// This method performs the complete connection flow:

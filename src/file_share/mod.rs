@@ -38,6 +38,7 @@ pub mod connection;
 // QUIC modules (replaces old TCP+TLS bridge)
 pub mod quic_crypto;
 pub mod quic_bridge;
+pub mod quic_relay;
 
 // Re-export core types
 pub use config::{
