@@ -180,17 +180,35 @@ pub fn DeviceRadar(
                                     
                                     div {
                                         style: "display: flex; align-items: center; gap: 8px;",
-                                        if device.is_trusted {
-                                            span { style: "color: #4ade80; font-size: 12px;", "✓ Connected" }
-                                        } else {
-                                            // Direct connect button - bypass code system
-                                            button {
-                                                style: "background: #10b981; color: white; border: none; padding: 6px 16px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500;",
-                                                onclick: move |e| {
-                                                    e.stop_propagation();
-                                                    handle_connect(device_id2.clone());
-                                                },
-                                                "🔗 Connect"
+                                        // Check actual QUIC connection status, not just trust
+                                        {
+                                            let is_quic_connected = crate::file_share::is_connected_to_quic(&device.id).unwrap_or(false);
+                                            if is_quic_connected {
+                                                rsx! {
+                                                    span { style: "color: #4ade80; font-size: 12px;", "✓ Connected (QUIC)" }
+                                                }
+                                            } else if device.is_trusted {
+                                                rsx! {
+                                                    button {
+                                                        style: "background: #3b82f6; color: white; border: none; padding: 6px 16px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500;",
+                                                        onclick: move |e| {
+                                                            e.stop_propagation();
+                                                            handle_connect(device_id2.clone());
+                                                        },
+                                                        "🔗 Reconnect"
+                                                    }
+                                                }
+                                            } else {
+                                                rsx! {
+                                                    button {
+                                                        style: "background: #10b981; color: white; border: none; padding: 6px 16px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500;",
+                                                        onclick: move |e| {
+                                                            e.stop_propagation();
+                                                            handle_connect(device_id2.clone());
+                                                        },
+                                                        "🔗 Connect"
+                                                    }
+                                                }
                                             }
                                         }
                                     }
