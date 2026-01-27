@@ -108,12 +108,14 @@ impl ConnectionCoordinator {
         let config = load_config()
             .map_err(|e| ConnectionError::NetworkError(format!("Failed to load config: {}", e)))?;
         
-        // Get local certificate fingerprint
-        let cert_manager = super::crypto::get_certificate_manager();
-        let cert_fingerprint = cert_manager.lock()
-            .map_err(|e| ConnectionError::NetworkError(format!("Lock error: {}", e)))?
-            .get_fingerprint()
-            .ok_or_else(|| ConnectionError::NetworkError("Certificate not initialized".to_string()))?;
+        // Get local certificate fingerprint from QUIC crypto
+        let cert_manager_lock = super::quic_crypto::get_quic_cert_manager()
+            .map_err(|e| ConnectionError::NetworkError(format!("Failed to get cert manager: {}", e)))?;
+        let cert_manager = cert_manager_lock.lock()
+            .map_err(|e| ConnectionError::NetworkError(format!("Lock error: {}", e)))?;
+        let cert_mgr = cert_manager.as_ref()
+            .ok_or_else(|| ConnectionError::NetworkError("Certificate manager not initialized".to_string()))?;
+        let cert_fingerprint = cert_mgr.fingerprint().to_string();
         
         // Get local IP address
         let local_ip = self.get_local_ip_address()
@@ -278,12 +280,14 @@ impl ConnectionCoordinator {
         let config = load_config()
             .map_err(|e| ConnectionError::NetworkError(format!("Failed to load config: {}", e)))?;
         
-        // Get local certificate fingerprint
-        let cert_manager = super::crypto::get_certificate_manager();
-        let cert_fingerprint = cert_manager.lock()
-            .map_err(|e| ConnectionError::NetworkError(format!("Lock error: {}", e)))?
-            .get_fingerprint()
-            .ok_or_else(|| ConnectionError::NetworkError("Certificate not initialized".to_string()))?;
+        // Get local certificate fingerprint from QUIC crypto
+        let cert_manager_lock = super::quic_crypto::get_quic_cert_manager()
+            .map_err(|e| ConnectionError::NetworkError(format!("Failed to get cert manager: {}", e)))?;
+        let cert_manager = cert_manager_lock.lock()
+            .map_err(|e| ConnectionError::NetworkError(format!("Lock error: {}", e)))?;
+        let cert_mgr = cert_manager.as_ref()
+            .ok_or_else(|| ConnectionError::NetworkError("Certificate manager not initialized".to_string()))?;
+        let cert_fingerprint = cert_mgr.fingerprint().to_string();
         
         // Get local IP address
         let local_ip = self.get_local_ip_address()
@@ -599,12 +603,14 @@ impl ConnectionCoordinator {
             }
         }
         
-        // Get our certificate fingerprint for the response
-        let cert_manager = super::crypto::get_certificate_manager();
-        let our_cert_fingerprint = cert_manager.lock()
-            .map_err(|e| ConnectionError::NetworkError(format!("Lock error: {}", e)))?
-            .get_fingerprint()
-            .ok_or_else(|| ConnectionError::NetworkError("Certificate not initialized".to_string()))?;
+        // Get our certificate fingerprint for the response from QUIC crypto
+        let cert_manager_lock = super::quic_crypto::get_quic_cert_manager()
+            .map_err(|e| ConnectionError::NetworkError(format!("Failed to get cert manager: {}", e)))?;
+        let cert_manager = cert_manager_lock.lock()
+            .map_err(|e| ConnectionError::NetworkError(format!("Lock error: {}", e)))?;
+        let cert_mgr = cert_manager.as_ref()
+            .ok_or_else(|| ConnectionError::NetworkError("Certificate manager not initialized".to_string()))?;
+        let our_cert_fingerprint = cert_mgr.fingerprint().to_string();
         
         // Get our device ID
         let config = load_config()
