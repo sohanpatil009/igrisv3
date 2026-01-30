@@ -20,6 +20,7 @@ mod platform;
 mod platform_utils;
 mod setup_manager;
 mod media;
+mod file_share;
 
 use dioxus::desktop::{Config, WindowBuilder};
 use core::audio_capture::{capture_audio_vad, CaptureConfig};
@@ -34,7 +35,7 @@ use core::stt::{init_whisper_context, transcribe_audio};
 use core::tts::TTS_ENGINE;
 use core::wake_word::listen_for_wake_word;
 use config::CONFIG;
-use ui::{SettingsPanel, SettingsButton, SearchResultsPanel, SearchResultItem, CameraPanel, PresentationPanel};
+use ui::{SettingsPanel, MenuButton, SearchResultsPanel, SearchResultItem, CameraPanel, PresentationPanel, FileSharePanel};
 
 // Global state for voice assistant
 static ASSISTANT_STATE: once_cell::sync::Lazy<Arc<Mutex<AssistantState>>> =
@@ -286,6 +287,17 @@ async fn start_voice_assistant() {
 
     // Initialize app monitoring (now handled by plugin system)
     add_log("Application plugin system initialized", LogLevel::Info);
+
+    // Initialize file sharing system
+    add_log("Initializing file sharing system...", LogLevel::Info);
+    match ui::init_file_share().await {
+        Ok(_) => {
+            add_log("File sharing system ready", LogLevel::Success);
+        }
+        Err(e) => {
+            add_log(&format!("File sharing init warning: {}", e), LogLevel::Warning);
+        }
+    }
 
     let whisper_ctx = match init_whisper_context() {
         Ok(ctx) => {
@@ -1210,6 +1222,9 @@ fn App() -> Element {
         // Presentation Panel (full screen overlay with TTS narration)
         PresentationPanel {}
 
+        // File Share Panel (floating panel)
+        FileSharePanel {}
+
         div { style: "width: 100vw; height: 100vh; display: flex; flex-direction: column; background: #000; color: #fff; font-family: 'Inter', sans-serif; position: relative; overflow: hidden;",
 
             if show_setup && setup_progress {
@@ -1235,8 +1250,8 @@ fn App() -> Element {
                     }
                 }
 
-                // Settings Button (top right)
-                SettingsButton { is_open: show_settings }
+                // Menu Button (top right)
+                MenuButton { settings_open: show_settings }
 
                 // Central Animated Panel
                 div { style: "display: flex; flex-direction: column; align-items: center; justify-content: center; gap: clamp(24px, 5vh, 48px); width: 100%; height: 100%; padding: clamp(10px, 2vw, 20px);",

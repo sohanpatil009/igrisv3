@@ -38,6 +38,9 @@ pub mod setup_manager;
 // Media capture (camera, video)
 pub mod media;
 
+// File sharing system
+pub mod file_share;
+
 // Global state for search results UI (shared across modules)
 #[derive(Clone, Debug, Default)]
 pub struct SearchState {
