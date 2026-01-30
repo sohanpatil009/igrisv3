@@ -76,11 +76,14 @@ pub async fn init_file_share() -> Result<(), Box<dyn std::error::Error>> {
                     Err(e) => {
                         if attempt < 3 {
                             println!("⚠️  File share init attempt {} failed: {}. Retrying in {}s...", 
-                                attempt, e, attempt);
-                            tokio::time::sleep(tokio::time::Duration::from_secs(attempt as u64)).await;
+                                attempt, e, attempt * 2);
+                            tokio::time::sleep(tokio::time::Duration::from_secs(attempt as u64 * 2)).await;
                             continue;
                         } else {
-                            return Err(e);
+                            // On final failure, just warn but don't crash the app
+                            println!("⚠️  File share initialization failed after 3 attempts: {}", e);
+                            println!("ℹ️  File sharing will be unavailable. You can still use voice commands.");
+                            return Ok(()); // Return Ok to not block app startup
                         }
                     }
                 }
@@ -89,16 +92,18 @@ pub async fn init_file_share() -> Result<(), Box<dyn std::error::Error>> {
                 if attempt < 3 {
                     println!("⚠️  File share manager creation attempt {} failed: {}. Retrying...", 
                         attempt, e);
-                    tokio::time::sleep(tokio::time::Duration::from_secs(attempt as u64)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_secs(attempt as u64 * 2)).await;
                     continue;
                 } else {
-                    return Err(e);
+                    println!("⚠️  File share initialization failed after 3 attempts: {}", e);
+                    println!("ℹ️  File sharing will be unavailable. You can still use voice commands.");
+                    return Ok(()); // Return Ok to not block app startup
                 }
             }
         }
     }
     
-    Err("Failed to initialize file share after 3 attempts".into())
+    Ok(())
 }
 
 pub async fn shutdown_file_share() -> Result<(), Box<dyn std::error::Error>> {
