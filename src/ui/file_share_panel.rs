@@ -52,23 +52,53 @@ pub async fn init_file_share() -> Result<(), Box<dyn std::error::Error>> {
     // First, try to stop any existing file share service
     let _ = shutdown_file_share().await;
     
-    // Small delay to ensure ports are released
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    // Longer delay to ensure ports are fully released (macOS needs more time)
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
     
-    // Now create and start the new manager
-    let manager = FileShareManager::new().await?;
-    manager.start().await?;
-    let code = manager.get_bridge_code().await;
-    
-    // Update state with the code
-    {
-        let mut state = FILE_SHARE_STATE.lock().unwrap();
-        state.bridge_code = code.clone();
+    // Try up to 3 times with increasing delays
+    for attempt in 1..=3 {
+        match FileShareManager::new().await {
+            Ok(manager) => {
+                match manager.start().await {
+                    Ok(_) => {
+                        let code = manager.get_bridge_code().await;
+                        
+                        // Update state with the code
+                        {
+                            let mut state = FILE_SHARE_STATE.lock().unwrap();
+                            state.bridge_code = code.clone();
+                        }
+                        
+                        *FILE_SHARE_MANAGER.lock().unwrap() = Some(manager);
+                        println!("✅ File share initialized with code: {}", code);
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        if attempt < 3 {
+                            println!("⚠️  File share init attempt {} failed: {}. Retrying in {}s...", 
+                                attempt, e, attempt);
+                            tokio::time::sleep(tokio::time::Duration::from_secs(attempt as u64)).await;
+                            continue;
+                        } else {
+                            return Err(e);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                if attempt < 3 {
+                    println!("⚠️  File share manager creation attempt {} failed: {}. Retrying...", 
+                        attempt, e);
+                    tokio::time::sleep(tokio::time::Duration::from_secs(attempt as u64)).await;
+                    continue;
+                } else {
+                    return Err(e);
+                }
+            }
+        }
     }
     
-    *FILE_SHARE_MANAGER.lock().unwrap() = Some(manager);
-    println!("✅ File share initialized with code: {}", code);
-    Ok(())
+    Err("Failed to initialize file share after 3 attempts".into())
 }
 
 pub async fn shutdown_file_share() -> Result<(), Box<dyn std::error::Error>> {
