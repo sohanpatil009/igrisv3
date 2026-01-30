@@ -49,15 +49,34 @@ pub static FILE_SHARE_STATE: once_cell::sync::Lazy<Arc<Mutex<FileSharePanelState
     once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(FileSharePanelState::default())));
 
 pub async fn init_file_share() -> Result<(), Box<dyn std::error::Error>> {
+    // First, try to stop any existing file share service
+    let _ = shutdown_file_share().await;
+    
+    // Small delay to ensure ports are released
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    
+    // Now create and start the new manager
     let manager = FileShareManager::new().await?;
     manager.start().await?;
     let code = manager.get_bridge_code().await;
+    
+    // Update state with the code
     {
         let mut state = FILE_SHARE_STATE.lock().unwrap();
-        state.bridge_code = code;
+        state.bridge_code = code.clone();
     }
+    
     *FILE_SHARE_MANAGER.lock().unwrap() = Some(manager);
-    println!("✅ File share initialized");
+    println!("✅ File share initialized with code: {}", code);
+    Ok(())
+}
+
+pub async fn shutdown_file_share() -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(manager) = FILE_SHARE_MANAGER.lock().unwrap().as_ref() {
+        manager.stop().await?;
+        println!("✅ File share stopped");
+    }
+    *FILE_SHARE_MANAGER.lock().unwrap() = None;
     Ok(())
 }
 

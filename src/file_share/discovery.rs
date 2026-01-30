@@ -58,7 +58,54 @@ impl DiscoveryService {
             self.config.discovery_port,
         );
 
-        let socket = UdpSocket::bind(format!("0.0.0.0:{}", self.config.discovery_port)).await?;
+        // Create socket with SO_REUSEADDR to allow rebinding
+        let socket = {
+            #[cfg(unix)]
+            {
+                use std::os::unix::io::{AsRawFd, FromRawFd};
+                let std_socket = std::net::UdpSocket::bind(format!("0.0.0.0:{}", self.config.discovery_port))?;
+                let fd = std_socket.as_raw_fd();
+                unsafe {
+                    let optval: libc::c_int = 1;
+                    // SO_REUSEADDR
+                    libc::setsockopt(
+                        fd,
+                        libc::SOL_SOCKET,
+                        libc::SO_REUSEADDR,
+                        &optval as *const _ as *const libc::c_void,
+                        std::mem::size_of_val(&optval) as libc::socklen_t,
+                    );
+                    // SO_REUSEPORT (macOS/BSD)
+                    libc::setsockopt(
+                        fd,
+                        libc::SOL_SOCKET,
+                        libc::SO_REUSEPORT,
+                        &optval as *const _ as *const libc::c_void,
+                        std::mem::size_of_val(&optval) as libc::socklen_t,
+                    );
+                }
+                std_socket.set_nonblocking(true)?;
+                UdpSocket::from_std(std_socket)?
+            }
+            #[cfg(windows)]
+            {
+                use std::os::windows::io::{AsRawSocket, FromRawSocket};
+                let std_socket = std::net::UdpSocket::bind(format!("0.0.0.0:{}", self.config.discovery_port))?;
+                let socket = std_socket.as_raw_socket();
+                unsafe {
+                    let optval: i32 = 1;
+                    winapi::um::winsock2::setsockopt(
+                        socket as _,
+                        winapi::um::winsock2::SOL_SOCKET,
+                        winapi::um::winsock2::SO_REUSEADDR,
+                        &optval as *const _ as *const i8,
+                        std::mem::size_of_val(&optval) as i32,
+                    );
+                }
+                std_socket.set_nonblocking(true)?;
+                UdpSocket::from_std(std_socket)?
+            }
+        };
         
         // Join multicast group
         socket.join_multicast_v4(

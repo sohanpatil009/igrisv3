@@ -97,8 +97,12 @@ impl TransferManager {
             return Ok(());
         }
 
-        // Start TCP listener for incoming transfers
-        let listener = TcpListener::bind(format!("0.0.0.0:{}", self.config.transfer_port)).await?;
+        // Start TCP listener for incoming transfers with SO_REUSEADDR
+        let listener = {
+            let std_listener = std::net::TcpListener::bind(format!("0.0.0.0:{}", self.config.transfer_port))?;
+            std_listener.set_nonblocking(true)?;
+            TcpListener::from_std(std_listener)?
+        };
         
         let accept_transfers = self.active_transfers.clone();
         let accept_event_tx = self.event_tx.clone();

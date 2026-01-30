@@ -85,8 +85,12 @@ impl BridgeService {
         // Generate initial code
         self.generate_new_code().await;
 
-        // Start TCP listener for incoming connections
-        let listener = TcpListener::bind(format!("0.0.0.0:{}", self.config.bridge_port)).await?;
+        // Start TCP listener for incoming connections with SO_REUSEADDR
+        let listener = {
+            let std_listener = std::net::TcpListener::bind(format!("0.0.0.0:{}", self.config.bridge_port))?;
+            std_listener.set_nonblocking(true)?;
+            TcpListener::from_std(std_listener)?
+        };
         
         let accept_pending = self.pending_connections.clone();
         let accept_active = self.active_bridges.clone();
