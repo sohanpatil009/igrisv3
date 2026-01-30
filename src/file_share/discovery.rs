@@ -106,7 +106,8 @@ impl DiscoveryService {
                     let addr: SocketAddr = format!("0.0.0.0:{}", self.config.discovery_port).parse()?;
                     let (addr_ptr, addr_len) = match addr {
                         SocketAddr::V4(addr) => {
-                            #[cfg(target_os = "macos")]
+                            // BSD-based systems (macOS, iOS, FreeBSD) have sin_len field
+                            #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd"))]
                             let sin = libc::sockaddr_in {
                                 sin_len: std::mem::size_of::<libc::sockaddr_in>() as u8,
                                 sin_family: libc::AF_INET as _,
@@ -116,7 +117,8 @@ impl DiscoveryService {
                                 },
                                 sin_zero: [0; 8],
                             };
-                            #[cfg(not(target_os = "macos"))]
+                            // Linux and other Unix systems don't have sin_len
+                            #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd")))]
                             let sin = libc::sockaddr_in {
                                 sin_family: libc::AF_INET as _,
                                 sin_port: addr.port().to_be(),
