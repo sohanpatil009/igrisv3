@@ -52,8 +52,23 @@ pub async fn init_file_share() -> Result<(), Box<dyn std::error::Error>> {
     // First, try to stop any existing file share service
     let _ = shutdown_file_share().await;
     
-    // Longer delay to ensure ports are fully released (macOS needs more time)
-    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+    // Wait significantly longer for macOS to release ports (kernel needs time)
+    println!("⏳ Waiting for ports to be released...");
+    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+    
+    // Check if ports are actually free before attempting
+    for port in [45678, 45679, 45680] {
+        match std::net::UdpSocket::bind(format!("0.0.0.0:{}", port)) {
+            Ok(socket) => {
+                drop(socket); // Immediately release
+                println!("✓ Port {} is available", port);
+            }
+            Err(e) => {
+                println!("⚠️  Port {} still in use: {}", port, e);
+                println!("💡 Tip: Restart your Mac or wait 60 seconds for kernel to release ports");
+            }
+        }
+    }
     
     // Try up to 3 times with increasing delays
     for attempt in 1..=3 {
@@ -76,8 +91,8 @@ pub async fn init_file_share() -> Result<(), Box<dyn std::error::Error>> {
                     Err(e) => {
                         if attempt < 3 {
                             println!("⚠️  File share init attempt {} failed: {}. Retrying in {}s...", 
-                                attempt, e, attempt * 2);
-                            tokio::time::sleep(tokio::time::Duration::from_secs(attempt as u64 * 2)).await;
+                                attempt, e, attempt * 3);
+                            tokio::time::sleep(tokio::time::Duration::from_secs(attempt as u64 * 3)).await;
                             continue;
                         } else {
                             // On final failure, just warn but don't crash the app
@@ -92,7 +107,7 @@ pub async fn init_file_share() -> Result<(), Box<dyn std::error::Error>> {
                 if attempt < 3 {
                     println!("⚠️  File share manager creation attempt {} failed: {}. Retrying...", 
                         attempt, e);
-                    tokio::time::sleep(tokio::time::Duration::from_secs(attempt as u64 * 2)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_secs(attempt as u64 * 3)).await;
                     continue;
                 } else {
                     println!("⚠️  File share initialization failed after 3 attempts: {}", e);

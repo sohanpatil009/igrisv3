@@ -217,10 +217,44 @@ impl DeviceInfo {
     /// Get local IP address
     async fn get_local_ip() -> Result<IpAddr, Box<dyn std::error::Error>> {
         // Try to connect to a remote address to determine local IP
-        let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
-        socket.connect("8.8.8.8:80").await?;
-        let local_addr = socket.local_addr()?;
-        Ok(local_addr.ip())
+        match tokio::net::UdpSocket::bind("0.0.0.0:0").await {
+            Ok(socket) => {
+                match socket.connect("8.8.8.8:80").await {
+                    Ok(_) => {
+                        if let Ok(local_addr) = socket.local_addr() {
+                            return Ok(local_addr.ip());
+                        }
+                    }
+                    Err(_) => {
+                        // Network unreachable, try localhost
+                        println!("⚠️  Network unreachable, using localhost");
+                    }
+                }
+            }
+            Err(_) => {}
+        }
+        
+        // Fallback: Try to get local IP from network interfaces
+        #[cfg(target_os = "macos")]
+        {
+            use std::process::Command;
+            if let Ok(output) = Command::new("ipconfig")
+                .arg("getifaddr")
+                .arg("en0")
+                .output()
+            {
+                if let Ok(ip_str) = String::from_utf8(output.stdout) {
+                    if let Ok(ip) = ip_str.trim().parse::<IpAddr>() {
+                        println!("✓ Using local IP from en0: {}", ip);
+                        return Ok(ip);
+                    }
+                }
+            }
+        }
+        
+        // Final fallback: use localhost
+        println!("ℹ️  Using localhost (127.0.0.1) for file sharing");
+        Ok(IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)))
     }
 
     /// Get configuration directory

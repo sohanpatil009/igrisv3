@@ -41,7 +41,7 @@ impl DiscoveryService {
             socket: None,
             event_tx,
             running: Arc::new(RwLock::new(false)),
-            config: FileShareConfig::default(),
+            config: FileShareConfig::with_available_ports(), // Use available ports
         })
     }
 
@@ -79,28 +79,50 @@ impl DiscoveryService {
                     let optval: libc::c_int = 1;
                     
                     // SO_REUSEADDR - must be set before bind
-                    if libc::setsockopt(
+                    let ret = libc::setsockopt(
                         fd,
                         libc::SOL_SOCKET,
                         libc::SO_REUSEADDR,
                         &optval as *const _ as *const libc::c_void,
                         std::mem::size_of_val(&optval) as libc::socklen_t,
-                    ) < 0 {
+                    );
+                    if ret < 0 {
+                        let err = std::io::Error::last_os_error();
+                        eprintln!("[DEBUG] SO_REUSEADDR failed: {}", err);
                         libc::close(fd);
-                        return Err("Failed to set SO_REUSEADDR".into());
+                        return Err(format!("Failed to set SO_REUSEADDR: {}", err).into());
                     }
+                    println!("[DEBUG] SO_REUSEADDR set successfully");
                     
                     // SO_REUSEPORT - must be set before bind (macOS/BSD)
-                    if libc::setsockopt(
+                    let ret = libc::setsockopt(
                         fd,
                         libc::SOL_SOCKET,
                         libc::SO_REUSEPORT,
                         &optval as *const _ as *const libc::c_void,
                         std::mem::size_of_val(&optval) as libc::socklen_t,
-                    ) < 0 {
+                    );
+                    if ret < 0 {
+                        let err = std::io::Error::last_os_error();
+                        eprintln!("[DEBUG] SO_REUSEPORT failed: {}", err);
                         libc::close(fd);
-                        return Err("Failed to set SO_REUSEPORT".into());
+                        return Err(format!("Failed to set SO_REUSEPORT: {}", err).into());
                     }
+                    println!("[DEBUG] SO_REUSEPORT set successfully");
+                    
+                    // Set SO_LINGER to 0 for immediate close (helps with TIME_WAIT)
+                    let linger = libc::linger {
+                        l_onoff: 1,
+                        l_linger: 0,
+                    };
+                    libc::setsockopt(
+                        fd,
+                        libc::SOL_SOCKET,
+                        libc::SO_LINGER,
+                        &linger as *const _ as *const libc::c_void,
+                        std::mem::size_of::<libc::linger>() as libc::socklen_t,
+                    );
+                    println!("[DEBUG] SO_LINGER set to 0");
                     
                     // Now bind the socket
                     let addr: SocketAddr = format!("0.0.0.0:{}", self.config.discovery_port).parse()?;
@@ -139,9 +161,12 @@ impl DiscoveryService {
                     };
                     
                     if libc::bind(fd, addr_ptr, addr_len) < 0 {
+                        let err = std::io::Error::last_os_error();
+                        eprintln!("[DEBUG] Bind failed: {} (fd={}, port={})", err, fd, self.config.discovery_port);
                         libc::close(fd);
                         return Err(format!("Failed to bind to port {} (error 48: address already in use)", self.config.discovery_port).into());
                     }
+                    println!("[DEBUG] Bind successful on port {}", self.config.discovery_port);
                     
                     // Set non-blocking
                     let flags = libc::fcntl(fd, libc::F_GETFL, 0);

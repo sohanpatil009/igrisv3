@@ -86,7 +86,7 @@ impl TransferManager {
             active_transfers: Arc::new(RwLock::new(HashMap::new())),
             event_tx,
             running: Arc::new(RwLock::new(false)),
-            config: FileShareConfig::default(),
+            config: FileShareConfig::with_available_ports(),
         })
     }
 

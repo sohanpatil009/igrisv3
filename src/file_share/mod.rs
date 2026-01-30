@@ -172,3 +172,46 @@ impl Default for FileShareConfig {
         }
     }
 }
+
+impl FileShareConfig {
+    /// Try to find available ports if defaults are in use
+    pub fn with_available_ports() -> Self {
+        let mut config = Self::default();
+        
+        // Try to bind to default ports, if they fail, find alternatives
+        if std::net::UdpSocket::bind(format!("0.0.0.0:{}", config.discovery_port)).is_err() {
+            // Port in use, try alternatives
+            for port in 45681..45700 {
+                if std::net::UdpSocket::bind(format!("0.0.0.0:{}", port)).is_ok() {
+                    println!("⚠️  Default discovery port {} in use, using {} instead", config.discovery_port, port);
+                    config.discovery_port = port;
+                    break;
+                }
+            }
+        }
+        
+        if std::net::TcpListener::bind(format!("0.0.0.0:{}", config.transfer_port)).is_err() {
+            for port in 45681..45700 {
+                if port == config.discovery_port { continue; }
+                if std::net::TcpListener::bind(format!("0.0.0.0:{}", port)).is_ok() {
+                    println!("⚠️  Default transfer port {} in use, using {} instead", config.transfer_port, port);
+                    config.transfer_port = port;
+                    break;
+                }
+            }
+        }
+        
+        if std::net::TcpListener::bind(format!("0.0.0.0:{}", config.bridge_port)).is_err() {
+            for port in 45681..45700 {
+                if port == config.discovery_port || port == config.transfer_port { continue; }
+                if std::net::TcpListener::bind(format!("0.0.0.0:{}", port)).is_ok() {
+                    println!("⚠️  Default bridge port {} in use, using {} instead", config.bridge_port, port);
+                    config.bridge_port = port;
+                    break;
+                }
+            }
+        }
+        
+        config
+    }
+}
