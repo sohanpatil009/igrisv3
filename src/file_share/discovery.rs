@@ -88,11 +88,9 @@ impl DiscoveryService {
                     );
                     if ret < 0 {
                         let err = std::io::Error::last_os_error();
-                        eprintln!("[DEBUG] SO_REUSEADDR failed: {}", err);
                         libc::close(fd);
                         return Err(format!("Failed to set SO_REUSEADDR: {}", err).into());
                     }
-                    println!("[DEBUG] SO_REUSEADDR set successfully");
                     
                     // SO_REUSEPORT - must be set before bind (macOS/BSD)
                     let ret = libc::setsockopt(
@@ -104,11 +102,9 @@ impl DiscoveryService {
                     );
                     if ret < 0 {
                         let err = std::io::Error::last_os_error();
-                        eprintln!("[DEBUG] SO_REUSEPORT failed: {}", err);
                         libc::close(fd);
                         return Err(format!("Failed to set SO_REUSEPORT: {}", err).into());
                     }
-                    println!("[DEBUG] SO_REUSEPORT set successfully");
                     
                     // Set SO_LINGER to 0 for immediate close (helps with TIME_WAIT)
                     let linger = libc::linger {
@@ -122,7 +118,6 @@ impl DiscoveryService {
                         &linger as *const _ as *const libc::c_void,
                         std::mem::size_of::<libc::linger>() as libc::socklen_t,
                     );
-                    println!("[DEBUG] SO_LINGER set to 0");
                     
                     // Now bind the socket
                     let addr: SocketAddr = format!("0.0.0.0:{}", self.config.discovery_port).parse()?;
@@ -162,11 +157,9 @@ impl DiscoveryService {
                     
                     if libc::bind(fd, addr_ptr, addr_len) < 0 {
                         let err = std::io::Error::last_os_error();
-                        eprintln!("[DEBUG] Bind failed: {} (fd={}, port={})", err, fd, self.config.discovery_port);
                         libc::close(fd);
-                        return Err(format!("Failed to bind to port {} (error 48: address already in use)", self.config.discovery_port).into());
+                        return Err(format!("Failed to bind to port {}: {}", self.config.discovery_port, err).into());
                     }
-                    println!("[DEBUG] Bind successful on port {}", self.config.discovery_port);
                     
                     // Set non-blocking
                     let flags = libc::fcntl(fd, libc::F_GETFL, 0);
