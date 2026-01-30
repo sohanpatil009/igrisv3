@@ -58,34 +58,97 @@ impl DiscoveryService {
             self.config.discovery_port,
         );
 
-        // Create socket with SO_REUSEADDR to allow rebinding
+        // Create socket with SO_REUSEADDR/SO_REUSEPORT BEFORE binding
         let socket = {
             #[cfg(unix)]
             {
-                use std::os::unix::io::{AsRawFd, FromRawFd};
-                let std_socket = std::net::UdpSocket::bind(format!("0.0.0.0:{}", self.config.discovery_port))?;
-                let fd = std_socket.as_raw_fd();
+                use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd};
+                use std::net::UdpSocket as StdUdpSocket;
+                
+                // Create unbound socket
+                let domain = libc::AF_INET;
+                let socket_type = libc::SOCK_DGRAM;
+                let protocol = 0;
+                
+                let fd = unsafe { libc::socket(domain, socket_type, protocol) };
+                if fd < 0 {
+                    return Err("Failed to create socket".into());
+                }
+                
                 unsafe {
                     let optval: libc::c_int = 1;
-                    // SO_REUSEADDR
-                    libc::setsockopt(
+                    
+                    // SO_REUSEADDR - must be set before bind
+                    if libc::setsockopt(
                         fd,
                         libc::SOL_SOCKET,
                         libc::SO_REUSEADDR,
                         &optval as *const _ as *const libc::c_void,
                         std::mem::size_of_val(&optval) as libc::socklen_t,
-                    );
-                    // SO_REUSEPORT (macOS/BSD)
-                    libc::setsockopt(
+                    ) < 0 {
+                        libc::close(fd);
+                        return Err("Failed to set SO_REUSEADDR".into());
+                    }
+                    
+                    // SO_REUSEPORT - must be set before bind (macOS/BSD)
+                    if libc::setsockopt(
                         fd,
                         libc::SOL_SOCKET,
                         libc::SO_REUSEPORT,
                         &optval as *const _ as *const libc::c_void,
                         std::mem::size_of_val(&optval) as libc::socklen_t,
-                    );
+                    ) < 0 {
+                        libc::close(fd);
+                        return Err("Failed to set SO_REUSEPORT".into());
+                    }
+                    
+                    // Now bind the socket
+                    let addr: SocketAddr = format!("0.0.0.0:{}", self.config.discovery_port).parse()?;
+                    let (addr_ptr, addr_len) = match addr {
+                        SocketAddr::V4(addr) => {
+                            #[cfg(target_os = "macos")]
+                            let sin = libc::sockaddr_in {
+                                sin_len: std::mem::size_of::<libc::sockaddr_in>() as u8,
+                                sin_family: libc::AF_INET as _,
+                                sin_port: addr.port().to_be(),
+                                sin_addr: libc::in_addr {
+                                    s_addr: u32::from_ne_bytes(addr.ip().octets()),
+                                },
+                                sin_zero: [0; 8],
+                            };
+                            #[cfg(not(target_os = "macos"))]
+                            let sin = libc::sockaddr_in {
+                                sin_family: libc::AF_INET as _,
+                                sin_port: addr.port().to_be(),
+                                sin_addr: libc::in_addr {
+                                    s_addr: u32::from_ne_bytes(addr.ip().octets()),
+                                },
+                                sin_zero: [0; 8],
+                            };
+                            (
+                                &sin as *const _ as *const libc::sockaddr,
+                                std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+                            )
+                        }
+                        _ => {
+                            libc::close(fd);
+                            return Err("IPv6 not supported".into());
+                        }
+                    };
+                    
+                    if libc::bind(fd, addr_ptr, addr_len) < 0 {
+                        libc::close(fd);
+                        return Err(format!("Failed to bind to port {} (error 48: address already in use)", self.config.discovery_port).into());
+                    }
+                    
+                    // Set non-blocking
+                    let flags = libc::fcntl(fd, libc::F_GETFL, 0);
+                    libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+                    
+                    // Convert to std socket
+                    let std_socket = StdUdpSocket::from_raw_fd(fd);
+                    UdpSocket::from_std(std_socket)?
                 }
-                std_socket.set_nonblocking(true)?;
-                UdpSocket::from_std(std_socket)?
             }
             #[cfg(windows)]
             {
