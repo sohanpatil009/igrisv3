@@ -120,8 +120,8 @@ pub fn FileSharePanel() -> Element {
     let mut view = use_signal(|| PanelView::DeviceList);
     let mut devices = use_signal(|| Vec::<DeviceInfo>::new());
     let mut code = use_signal(|| String::from("0000"));
-    let mut connect_code = use_signal(|| String::new());
-    let mut status = use_signal(|| String::new());
+    let connect_code = use_signal(|| String::new());
+    let status = use_signal(|| String::new());
     let mut pulse = use_signal(|| 1.0);
     let mut device = use_signal(|| None::<DeviceInfo>);
     let mut path = use_signal(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("C:\\")));
