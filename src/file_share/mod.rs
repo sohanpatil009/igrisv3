@@ -44,13 +44,16 @@ impl FileShareManager {
     /// Start discovery and HTTP server
     pub async fn start(&self) -> anyhow::Result<()> {
         self.discovery.write().await.start_broadcasting().await?;
+        self.discovery.write().await.start_listening().await?;
         self.api.write().await.start_server().await?;
+        println!("[FILE_SHARE] mDNS broadcasting and listening started");
         Ok(())
     }
 
     /// Stop all services
     pub async fn stop(&self) -> anyhow::Result<()> {
         self.discovery.write().await.stop_broadcasting().await?;
+        self.discovery.write().await.stop_listening().await?;
         self.api.write().await.stop_server().await?;
         Ok(())
     }
