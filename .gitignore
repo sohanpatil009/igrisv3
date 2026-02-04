@@ -8,3 +8,7 @@
 
 # Exclude pkg folder (contains large binary files)
 pkg/
+
+# Reference repositories (not part of IGRIS)
+localsend/
+localsend_protocol/
