@@ -91,9 +91,16 @@ impl MdnsDiscovery {
 async fn broadcast_loop(device_info: DeviceInfo) -> Result<()> {
     println!("[mDNS] Starting broadcast loop for device: {}", device_info.alias);
     loop {
+        // Send multicast announcement
         match send_announcement(&device_info).await {
-            Ok(_) => println!("[mDNS] Announcement sent: {}", device_info.alias),
-            Err(e) => eprintln!("[mDNS] Failed to send announcement: {}", e),
+            Ok(_) => println!("[mDNS] Multicast announcement sent: {}", device_info.alias),
+            Err(e) => eprintln!("[mDNS] Failed to send multicast announcement: {}", e),
+        }
+        
+        // Also send broadcast announcement (for mobile hotspots)
+        match send_broadcast_announcement(&device_info).await {
+            Ok(_) => println!("[mDNS] Broadcast announcement sent: {}", device_info.alias),
+            Err(e) => eprintln!("[mDNS] Failed to send broadcast announcement: {}", e),
         }
 
         tokio::time::sleep(Duration::from_secs(30)).await;
@@ -209,6 +216,33 @@ async fn send_announcement(device_info: &DeviceInfo) -> Result<()> {
     
     println!("[mDNS] Sending announcement to {}:{} ({} bytes)", MULTICAST_ADDR, MULTICAST_PORT, data.len());
     socket.send_to(&data, addr)?;
+    Ok(())
+}
+
+/// Send broadcast announcement (for mobile hotspots and networks that block multicast)
+async fn send_broadcast_announcement(device_info: &DeviceInfo) -> Result<()> {
+    let socket = UdpSocket::bind("0.0.0.0:0")?;
+    socket.set_broadcast(true)?; // Enable broadcast
+    
+    let announcement = AnnouncementMessage {
+        alias: device_info.alias.clone(),
+        version: device_info.version.clone(),
+        device_model: device_info.device_model.clone(),
+        device_type: device_info.device_type.clone(),
+        fingerprint: device_info.fingerprint.clone(),
+        port: device_info.port,
+        protocol: device_info.protocol.clone(),
+        download: device_info.download,
+        announce: true,
+    };
+
+    let data = serde_json::to_vec(&announcement)?;
+    
+    // Send to broadcast address
+    let broadcast_addr: SocketAddr = format!("255.255.255.255:{}", MULTICAST_PORT).parse()?;
+    println!("[mDNS] Sending broadcast to 255.255.255.255:{} ({} bytes)", MULTICAST_PORT, data.len());
+    socket.send_to(&data, broadcast_addr)?;
+    
     Ok(())
 }
 
