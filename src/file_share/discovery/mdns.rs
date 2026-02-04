@@ -148,8 +148,24 @@ async fn listen_loop(
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                // Timeout is normal, just continue
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
             Err(e) => {
-                eprintln!("Socket error: {}", e);
+                // Only log error once per minute to avoid spam
+                static LAST_ERROR_TIME: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                let last = LAST_ERROR_TIME.load(std::sync::atomic::Ordering::Relaxed);
+                
+                if now - last > 60 {
+                    eprintln!("[mDNS] Socket error (check firewall): {}", e);
+                    LAST_ERROR_TIME.store(now, std::sync::atomic::Ordering::Relaxed);
+                }
+                
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         }

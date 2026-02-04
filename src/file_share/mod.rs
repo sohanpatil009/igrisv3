@@ -43,6 +43,21 @@ impl FileShareManager {
 
     /// Start discovery and HTTP server
     pub async fn start(&self) -> anyhow::Result<()> {
+        // Configure firewall first
+        println!("[FILE_SHARE] Configuring firewall for port 53317...");
+        let firewall_result = tokio::task::spawn_blocking(|| {
+            firewall::request_firewall_permission("IGRIS File Share", 53317)
+        }).await;
+        
+        match firewall_result {
+            Ok(Ok(_)) => println!("[FILE_SHARE] Firewall configured successfully"),
+            Ok(Err(e)) => {
+                eprintln!("[FILE_SHARE] Firewall configuration failed: {}", e);
+                eprintln!("[FILE_SHARE] You may need to manually allow port 53317 in firewall");
+            }
+            Err(e) => eprintln!("[FILE_SHARE] Firewall task error: {}", e),
+        }
+        
         self.discovery.write().await.start_broadcasting().await?;
         self.discovery.write().await.start_listening().await?;
         self.api.write().await.start_server().await?;
