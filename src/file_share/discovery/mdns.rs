@@ -89,9 +89,11 @@ impl MdnsDiscovery {
 
 /// Broadcast loop - sends announcements periodically
 async fn broadcast_loop(device_info: DeviceInfo) -> Result<()> {
+    println!("[mDNS] Starting broadcast loop for device: {}", device_info.alias);
     loop {
-        if let Err(e) = send_announcement(&device_info).await {
-            eprintln!("Failed to send announcement: {}", e);
+        match send_announcement(&device_info).await {
+            Ok(_) => println!("[mDNS] Announcement sent: {}", device_info.alias),
+            Err(e) => eprintln!("[mDNS] Failed to send announcement: {}", e),
         }
 
         tokio::time::sleep(Duration::from_secs(30)).await;
@@ -103,6 +105,7 @@ async fn listen_loop(
     registry: Arc<RwLock<DeviceRegistry>>,
     our_device_info: DeviceInfo,
 ) -> Result<()> {
+    println!("[mDNS] Starting listen loop on port {}", MULTICAST_PORT);
     let socket = UdpSocket::bind(format!("0.0.0.0:{}", MULTICAST_PORT))?;
     socket.set_read_timeout(Some(Duration::from_secs(1)))?;
 
@@ -110,21 +113,27 @@ async fn listen_loop(
     let multicast_addr: IpAddr = MULTICAST_ADDR.parse()?;
     if let IpAddr::V4(addr) = multicast_addr {
         socket.join_multicast_v4(&addr, &"0.0.0.0".parse().unwrap())?;
+        println!("[mDNS] Joined multicast group: {}", MULTICAST_ADDR);
     }
 
     let mut buf = [0u8; 4096];
+    println!("[mDNS] Listening for announcements...");
 
     loop {
         match socket.recv_from(&mut buf) {
             Ok((len, addr)) => {
+                println!("[mDNS] Received {} bytes from {}", len, addr);
                 if let Ok(msg) = serde_json::from_slice::<AnnouncementMessage>(&buf[..len]) {
+                    println!("[mDNS] Parsed announcement from: {} ({})", msg.alias, msg.fingerprint);
+                    
                     // Ignore self
                     if msg.fingerprint == our_device_info.fingerprint {
+                        println!("[mDNS] Ignoring self announcement");
                         continue;
                     }
 
                     let device_info = DeviceInfo {
-                        alias: msg.alias,
+                        alias: msg.alias.clone(),
                         version: msg.version,
                         device_model: msg.device_model,
                         device_type: msg.device_type,
@@ -135,14 +144,18 @@ async fn listen_loop(
                     };
 
                     let device = Device::from_device_info(device_info, addr.ip());
+                    println!("[mDNS] ✓ Discovered device: {} at {}:{}", msg.alias, addr.ip(), msg.port);
                     registry.write().await.add_device(device);
 
                     // Send response if announce is true
                     if msg.announce {
+                        println!("[mDNS] Sending register response to {}", msg.alias);
                         if let Err(e) = send_register_response(&our_device_info, addr).await {
-                            eprintln!("Failed to send register response: {}", e);
+                            eprintln!("[mDNS] Failed to send register response: {}", e);
                         }
                     }
+                } else {
+                    println!("[mDNS] Failed to parse announcement (invalid JSON)");
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -194,6 +207,7 @@ async fn send_announcement(device_info: &DeviceInfo) -> Result<()> {
     let data = serde_json::to_vec(&announcement)?;
     let addr: SocketAddr = format!("{}:{}", MULTICAST_ADDR, MULTICAST_PORT).parse()?;
     
+    println!("[mDNS] Sending announcement to {}:{} ({} bytes)", MULTICAST_ADDR, MULTICAST_PORT, data.len());
     socket.send_to(&data, addr)?;
     Ok(())
 }
