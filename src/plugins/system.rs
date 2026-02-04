@@ -44,8 +44,6 @@ pub enum ActionType {
     CustomFunction,
     /// Camera mode operations
     CameraMode,
-    /// File share operations
-    FileShare,
 }
 
 impl std::fmt::Display for ActionType {
@@ -57,7 +55,6 @@ impl std::fmt::Display for ActionType {
             ActionType::HttpRequest => write!(f, "HttpRequest"),
             ActionType::CustomFunction => write!(f, "CustomFunction"),
             ActionType::CameraMode => write!(f, "CameraMode"),
-            ActionType::FileShare => write!(f, "FileShare"),
         }
     }
 }
@@ -391,11 +388,6 @@ impl PluginManager {
                 // Camera mode is handled specially in main.rs
                 // Return a special marker that main.rs will recognize
                 Ok(format!("CAMERA_MODE:{}", result.command.action_data))
-            }
-            ActionType::FileShare => {
-                // File share is handled specially in main.rs
-                // Return a special marker that main.rs will recognize
-                Ok(format!("FILE_SHARE:{}", result.command.action_data))
             }
         }
     }

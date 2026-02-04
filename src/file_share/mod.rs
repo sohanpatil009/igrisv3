@@ -1,217 +1,81 @@
-// src/file_share/mod.rs
-// Cross-platform file sharing ecosystem
+// File Share Module - LocalSend Protocol Implementation
+// Based on LocalSend Protocol v2.1
 
-pub mod discovery;
-pub mod transfer;
+pub mod api;
+pub mod connection;
 pub mod crypto;
-pub mod trust;
-pub mod bridge;
-pub mod device;
+pub mod discovery;
 pub mod protocol;
+pub mod transfer;
+pub mod trust;
+pub mod firewall;
 
-use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc};
-use serde::{Serialize, Deserialize};
+use tokio::sync::RwLock;
 
-pub use discovery::*;
-pub use transfer::*;
-pub use crypto::*;
-pub use trust::*;
-pub use bridge::*;
-pub use device::*;
-pub use protocol::*;
+pub use api::{FileShareApi, FileShareCommand, FileShareEvent};
+pub use discovery::{Device, DeviceRegistry, MdnsDiscovery};
+pub use protocol::{FileInfo, PrepareUploadRequest, PrepareUploadResponse, SessionInfo};
+pub use transfer::{TransferOrchestrator, TransferProgress, TransferStatus};
 
-/// Main file sharing manager
-#[derive(Clone)]
+/// Main File Share Manager
 pub struct FileShareManager {
-    pub discovery: Arc<DiscoveryService>,
-    pub transfer: Arc<TransferManager>,
-    pub trust: Arc<TrustManager>,
-    pub bridge: Arc<BridgeService>,
-    pub device_info: DeviceInfo,
-    pub event_tx: mpsc::UnboundedSender<FileShareEvent>,
-}
-
-/// File sharing events
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum FileShareEvent {
-    DeviceDiscovered(DeviceInfo),
-    DeviceLost(String),
-    ConnectionRequest(String, SocketAddr),
-    TransferStarted(String, String),
-    TransferProgress(String, u64, u64),
-    TransferCompleted(String),
-    TransferFailed(String, String),
-    TrustRequest(String, String),
-    TrustEstablished(String),
+    discovery: Arc<RwLock<MdnsDiscovery>>,
+    registry: Arc<RwLock<DeviceRegistry>>,
+    orchestrator: Arc<TransferOrchestrator>,
+    api: Arc<RwLock<FileShareApi>>,
 }
 
 impl FileShareManager {
-    /// Create new file share manager
-    pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let (event_tx, _) = mpsc::unbounded_channel();
-        
-        let device_info = DeviceInfo::current().await?;
-        let trust = Arc::new(TrustManager::new().await?);
-        let crypto = Arc::new(CryptoManager::new().await?);
-        let discovery = Arc::new(DiscoveryService::new(device_info.clone(), event_tx.clone()).await?);
-        let transfer = Arc::new(TransferManager::new(crypto.clone(), trust.clone(), event_tx.clone()).await?);
-        let bridge = Arc::new(BridgeService::new(device_info.clone(), event_tx.clone()).await?);
+    pub async fn new(device_name: String, port: u16) -> anyhow::Result<Self> {
+        let registry = Arc::new(RwLock::new(DeviceRegistry::new()));
+        let discovery = Arc::new(RwLock::new(MdnsDiscovery::new(device_name.clone(), port, registry.clone()).await?));
+        let orchestrator = Arc::new(TransferOrchestrator::new());
+        let api = Arc::new(RwLock::new(FileShareApi::new(port, orchestrator.clone()).await?));
 
         Ok(Self {
             discovery,
-            transfer,
-            trust,
-            bridge,
-            device_info,
-            event_tx,
+            registry,
+            orchestrator,
+            api,
         })
     }
 
-    /// Start file sharing services
-    pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
-        // Start discovery service
-        self.discovery.start().await?;
-        
-        // Start transfer service
-        self.transfer.start().await?;
-        
-        // Start bridge service for cross-network connections
-        self.bridge.start().await?;
-        
-        println!("🚀 File sharing services started");
-        println!("📱 Device: {} ({})", self.device_info.name, self.device_info.id);
-        println!("🔗 Bridge Code: {}", self.bridge.get_code().await);
-        
+    /// Start discovery and HTTP server
+    pub async fn start(&self) -> anyhow::Result<()> {
+        self.discovery.write().await.start_broadcasting().await?;
+        self.api.write().await.start_server().await?;
         Ok(())
     }
 
-    /// Stop file sharing services
-    pub async fn stop(&self) -> Result<(), Box<dyn std::error::Error>> {
-        self.discovery.stop().await?;
-        self.transfer.stop().await?;
-        self.bridge.stop().await?;
-        
-        println!("🛑 File sharing services stopped");
+    /// Stop all services
+    pub async fn stop(&self) -> anyhow::Result<()> {
+        self.discovery.write().await.stop_broadcasting().await?;
+        self.api.write().await.stop_server().await?;
         Ok(())
     }
 
-    /// Get discovered devices
-    pub async fn get_devices(&self) -> Vec<DeviceInfo> {
-        self.discovery.get_devices().await
+    /// Get list of discovered devices
+    pub async fn get_devices(&self) -> Vec<Device> {
+        self.registry.read().await.get_all_devices()
     }
 
-    /// Connect to device by ID
-    pub async fn connect_device(&self, device_id: &str) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(device) = self.discovery.get_device(device_id).await {
-            self.transfer.connect_device(device).await?;
-            Ok(())
-        } else {
-            Err(format!("Device {} not found", device_id).into())
-        }
-    }
+    /// Send files to a device
+    pub async fn send_files(&self, device_id: &str, file_paths: Vec<String>) -> anyhow::Result<String> {
+        let device = self.registry.read().await.get_device(device_id).ok_or_else(|| {
+            anyhow::anyhow!("Device not found")
+        })?;
 
-    /// Connect using bridge code
-    pub async fn connect_by_code(&self, code: &str) -> Result<(), Box<dyn std::error::Error>> {
-        self.bridge.connect_by_code(code).await
-    }
-
-    /// Send file to device
-    pub async fn send_file(&self, device_id: &str, file_path: &str) -> Result<String, Box<dyn std::error::Error>> {
-        self.transfer.send_file(device_id, file_path).await
+        self.orchestrator.send_files(device, file_paths).await
     }
 
     /// Get transfer progress
-    pub async fn get_transfer_progress(&self, transfer_id: &str) -> Option<TransferProgress> {
-        self.transfer.get_progress(transfer_id).await
+    pub fn get_progress(&self, session_id: &str) -> Option<TransferProgress> {
+        self.orchestrator.get_progress(session_id)
     }
 
-    /// Get trusted devices
-    pub async fn get_trusted_devices(&self) -> Vec<DeviceInfo> {
-        self.trust.get_trusted_devices().await
-    }
-
-    /// Get current bridge code
-    pub async fn get_bridge_code(&self) -> String {
-        self.bridge.get_code().await
-    }
-
-    /// Subscribe to events
-    pub fn subscribe_events(&self) -> mpsc::UnboundedReceiver<FileShareEvent> {
-        let (tx, rx) = mpsc::unbounded_channel();
-        // In a real implementation, you'd register this receiver
-        // For now, return empty receiver
-        rx
-    }
-}
-
-/// Configuration for file sharing
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileShareConfig {
-    pub discovery_port: u16,
-    pub transfer_port: u16,
-    pub bridge_port: u16,
-    pub max_file_size: u64,
-    pub chunk_size: usize,
-    pub timeout_seconds: u64,
-    pub trust_duration_days: u32,
-}
-
-impl Default for FileShareConfig {
-    fn default() -> Self {
-        Self {
-            discovery_port: 45678,
-            transfer_port: 45679,
-            bridge_port: 45680,
-            max_file_size: 10 * 1024 * 1024 * 1024, // 10GB
-            chunk_size: 64 * 1024, // 64KB
-            timeout_seconds: 300, // 5 minutes
-            trust_duration_days: 30,
-        }
-    }
-}
-
-impl FileShareConfig {
-    /// Try to find available ports if defaults are in use
-    pub fn with_available_ports() -> Self {
-        let mut config = Self::default();
-        
-        // Try to bind to default ports, if they fail, find alternatives
-        if std::net::UdpSocket::bind(format!("0.0.0.0:{}", config.discovery_port)).is_err() {
-            // Port in use, try alternatives
-            for port in 45681..45700 {
-                if std::net::UdpSocket::bind(format!("0.0.0.0:{}", port)).is_ok() {
-                    println!("⚠️  Default discovery port {} in use, using {} instead", config.discovery_port, port);
-                    config.discovery_port = port;
-                    break;
-                }
-            }
-        }
-        
-        if std::net::TcpListener::bind(format!("0.0.0.0:{}", config.transfer_port)).is_err() {
-            for port in 45681..45700 {
-                if port == config.discovery_port { continue; }
-                if std::net::TcpListener::bind(format!("0.0.0.0:{}", port)).is_ok() {
-                    println!("⚠️  Default transfer port {} in use, using {} instead", config.transfer_port, port);
-                    config.transfer_port = port;
-                    break;
-                }
-            }
-        }
-        
-        if std::net::TcpListener::bind(format!("0.0.0.0:{}", config.bridge_port)).is_err() {
-            for port in 45681..45700 {
-                if port == config.discovery_port || port == config.transfer_port { continue; }
-                if std::net::TcpListener::bind(format!("0.0.0.0:{}", port)).is_ok() {
-                    println!("⚠️  Default bridge port {} in use, using {} instead", config.bridge_port, port);
-                    config.bridge_port = port;
-                    break;
-                }
-            }
-        }
-        
-        config
+    /// Cancel transfer
+    pub async fn cancel_transfer(&self, session_id: &str) -> anyhow::Result<()> {
+        self.orchestrator.cancel_transfer(session_id).await
     }
 }

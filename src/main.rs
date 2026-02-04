@@ -6,7 +6,7 @@
 
 use dioxus::prelude::*;
 use std::path::PathBuf;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock};
 
 // New organized module structure
 mod config;
@@ -287,17 +287,6 @@ async fn start_voice_assistant() {
 
     // Initialize app monitoring (now handled by plugin system)
     add_log("Application plugin system initialized", LogLevel::Info);
-
-    // Initialize file sharing system
-    add_log("Initializing file sharing system...", LogLevel::Info);
-    match ui::init_file_share().await {
-        Ok(_) => {
-            add_log("File sharing system ready", LogLevel::Success);
-        }
-        Err(e) => {
-            add_log(&format!("File sharing init warning: {}", e), LogLevel::Warning);
-        }
-    }
 
     let whisper_ctx = match init_whisper_context() {
         Ok(ctx) => {
@@ -1054,6 +1043,7 @@ fn App() -> Element {
     let mut setup_in_progress = use_signal(|| true);
     let mut show_setup_gui = use_signal(|| true);
     let show_settings = use_signal(|| false);
+    let mut show_file_share = use_signal(|| false);
     let mut status_text = use_signal(|| "Running First-Time Setup...".to_string());
     let mut last_command_text = use_signal(|| "Waiting for voice input...".to_string());
     let mut assistant_name = use_signal(|| CONFIG.assistant_name());
@@ -1075,6 +1065,35 @@ fn App() -> Element {
     
     // Camera panel state
     let mut show_camera_panel = use_signal(|| false);
+    
+    // File Share Manager - provide context for FileSharePanel
+    let mut file_share_manager = use_signal(|| None::<Arc<RwLock<file_share::FileShareManager>>>);
+    use_context_provider(|| file_share_manager);
+    
+    // Initialize FileShareManager when app starts
+    use_effect(move || {
+        spawn(async move {
+            match file_share::FileShareManager::new("IGRIS".to_string(), 53317).await {
+                Ok(manager) => {
+                    let manager_arc = Arc::new(RwLock::new(manager));
+                    *file_share_manager.write() = Some(manager_arc.clone());
+                    
+                    // Start the file share service
+                    if let Some(fs) = file_share_manager.read().as_ref() {
+                        let fs_lock = fs.read().await;
+                        if let Err(e) = fs_lock.start().await {
+                            eprintln!("Failed to start file share service: {}", e);
+                        } else {
+                            println!("✓ File Share service started on port 53317");
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to initialize FileShareManager: {}", e);
+                }
+            }
+        });
+    });
 
     use_effect(move || {
         spawn(async move {
@@ -1198,6 +1217,21 @@ fn App() -> Element {
         // Settings Panel (modal)
         SettingsPanel { is_open: show_settings }
 
+        // File Share Panel (modal)
+        if show_file_share() {
+            div {
+                style: "position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 100; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px);",
+                onclick: move |_| show_file_share.set(false),
+                
+                div {
+                    style: "position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 1200px; max-height: 90vh; overflow: auto; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.5);",
+                    onclick: move |e| e.stop_propagation(),
+                    
+                    FileSharePanel {}
+                }
+            }
+        }
+
         // Search Results Panel (modal)
         SearchResultsPanel {
             is_open: show_search_results,
@@ -1221,9 +1255,6 @@ fn App() -> Element {
 
         // Presentation Panel (full screen overlay with TTS narration)
         PresentationPanel {}
-
-        // File Share Panel (floating panel)
-        FileSharePanel {}
 
         div { style: "width: 100vw; height: 100vh; display: flex; flex-direction: column; background: #000; color: #fff; font-family: 'Inter', sans-serif; position: relative; overflow: hidden;",
 
@@ -1251,7 +1282,10 @@ fn App() -> Element {
                 }
 
                 // Menu Button (top right)
-                MenuButton { settings_open: show_settings }
+                MenuButton { 
+                    settings_open: show_settings,
+                    file_share_open: show_file_share
+                }
 
                 // Central Animated Panel
                 div { style: "display: flex; flex-direction: column; align-items: center; justify-content: center; gap: clamp(24px, 5vh, 48px); width: 100%; height: 100%; padding: clamp(10px, 2vw, 20px);",

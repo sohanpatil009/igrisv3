@@ -1,6 +1,6 @@
 # IGRIS v3 - Advanced Offline AI Voice Assistant
 
-A powerful, fully offline voice-activated AI assistant built with Rust and Dioxus 0.7. IGRIS provides hands-free control over your desktop with natural language understanding, cross-platform file sharing, camera control, and an extensible plugin system.
+A powerful, fully offline voice-activated AI assistant built with Rust and Dioxus 0.7. IGRIS provides hands-free control over your desktop with natural language understanding, camera control, and an extensible plugin system.
 
 ![IGRIS](icons/igris_icon.svg)
 
@@ -24,7 +24,7 @@ A powerful, fully offline voice-activated AI assistant built with Rust and Dioxu
 ### 🎬 Self-Presentation Mode
 - **Animated Slides** - Full-screen presentation UI
 - **TTS Narration** - IGRIS explains its own architecture
-- **Interactive Diagrams** - Visual flowcharts for Voice, NLU, FileShare systems
+- **Interactive Diagrams** - Visual flowcharts for Voice and NLU systems
 - **Voice Command** - Say "Tell me about yourself" to start
 
 ### 🔌 Plugin System
@@ -147,16 +147,6 @@ src/
 │   ├── ffmpeg_camera.rs # FFmpeg camera control
 │   ├── reminders.rs     # Alarms & reminders
 │   └── about.rs         # Self-introduction
-├── file_share/          # P2P file transfer
-│   ├── discovery.rs     # mDNS device discovery
-│   ├── transfer.rs      # File transfer protocol
-│   ├── crypto.rs        # TLS encryption
-│   └── trust.rs         # Device trust management
-├── file_share/          # P2P file transfer
-│   ├── discovery.rs     # mDNS device discovery
-│   ├── transfer.rs      # File transfer protocol
-│   ├── crypto.rs        # TLS encryption
-│   └── trust.rs         # Device trust management
 ├── plugins/             # Plugin system
 │   ├── system.rs        # Plugin manager
 │   └── builtin/         # Built-in plugins

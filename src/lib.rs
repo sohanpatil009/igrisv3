@@ -38,7 +38,7 @@ pub mod setup_manager;
 // Media capture (camera, video)
 pub mod media;
 
-// File sharing system
+// P2P File sharing system - LocalSend Protocol Implementation
 pub mod file_share;
 
 // Global state for search results UI (shared across modules)

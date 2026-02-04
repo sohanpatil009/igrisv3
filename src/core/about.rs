@@ -11,21 +11,20 @@ impl IgrisAbout {
     pub fn short_intro() -> &'static str {
         "I am IGRIS, your AI-powered voice assistant for desktop. \
          I run completely offline, ensuring your privacy. \
-         I can open apps, take photos, record videos, share files, and much more. \
+         I can open apps, take photos, record videos, and much more. \
          Just say 'Arise' or press Control Shift Space to activate me anytime."
     }
 
     /// Full introduction (detailed explanation)
     pub fn full_intro() -> String {
         format!(
-            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
+            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
             Self::intro_section(),
             Self::architecture_section(),
             Self::voice_flow_section(),
             Self::nlu_section(),
             Self::apps_section(),
             Self::camera_section(),
-            Self::file_share_section(),
             Self::tech_section()
         )
     }
@@ -46,7 +45,7 @@ impl IgrisAbout {
          The core processing layer handles voice activity detection, wake word recognition, speech-to-text with Whisper, and natural language understanding. \
          My plugin system manages over 50 applications across categories like browsers, office, media, communication, creative tools, and gaming. \
          The output layer includes Piper text-to-speech for voice responses, Dioxus UI for visual feedback, and action executors for system commands. \
-         Supporting modules include the Setup Manager for auto-downloading models, Config for personality and permissions, and File Share for device-to-device transfers."
+         Supporting modules include the Setup Manager for auto-downloading models and Config for personality and permissions."
     }
 
     /// Voice processing flow explanation
@@ -96,17 +95,6 @@ impl IgrisAbout {
          All media saves to your Pictures and Videos folders under an IGRIS subfolder."
     }
 
-    /// File share section with architecture
-    pub fn file_share_section() -> &'static str {
-        "My file sharing module enables secure device-to-device transfers. \
-         The architecture has three layers. \
-         Discovery Service broadcasts UDP packets on port 5354 to find other IGRIS devices on your local network. \
-         Trust Manager handles device verification with 6-digit codes and maintains trusted device lists. \
-         Transfer Manager handles the actual file transfer over TCP port 5355 with TLS encryption. \
-         Each device generates its own TLS certificate for end-to-end encryption. \
-         The flow is: discover devices, verify with code, establish trust, then transfer files securely."
-    }
-
     /// Setup manager flow
     pub fn setup_flow_section() -> &'static str {
         "My Setup Manager handles first-time initialization. \
@@ -152,7 +140,6 @@ impl IgrisAbout {
             AboutSection::Nlu => Self::nlu_section(),
             AboutSection::Apps => Self::apps_section(),
             AboutSection::Camera => Self::camera_section(),
-            AboutSection::FileShare => Self::file_share_section(),
             AboutSection::SetupFlow => Self::setup_flow_section(),
             AboutSection::Tech => Self::tech_section(),
         }
@@ -168,7 +155,6 @@ pub enum AboutSection {
     Nlu,
     Apps,
     Camera,
-    FileShare,
     SetupFlow,
     Tech,
 }
@@ -206,11 +192,6 @@ impl AboutSection {
             || query_lower.contains("video") || query_lower.contains("record") {
             Some(Self::Camera)
         }
-        // File share queries
-        else if query_lower.contains("file") || query_lower.contains("share") 
-            || query_lower.contains("transfer") || query_lower.contains("send") {
-            Some(Self::FileShare)
-        }
         // Setup queries
         else if query_lower.contains("setup") || query_lower.contains("install")
             || query_lower.contains("download") || query_lower.contains("first time") {
@@ -235,7 +216,6 @@ impl AboutSection {
             Self::Nlu,
             Self::Apps,
             Self::Camera,
-            Self::FileShare,
             Self::SetupFlow,
             Self::Tech,
         ]
@@ -303,7 +283,6 @@ mod tests {
         assert_eq!(AboutSection::from_query("how do you understand me"), Some(AboutSection::Nlu));
         assert_eq!(AboutSection::from_query("what apps can you open"), Some(AboutSection::Apps));
         assert_eq!(AboutSection::from_query("camera features"), Some(AboutSection::Camera));
-        assert_eq!(AboutSection::from_query("file sharing"), Some(AboutSection::FileShare));
         assert_eq!(AboutSection::from_query("setup process"), Some(AboutSection::SetupFlow));
         assert_eq!(AboutSection::from_query("tech stack"), Some(AboutSection::Tech));
     }
@@ -311,6 +290,6 @@ mod tests {
     #[test]
     fn test_all_sections() {
         let sections = AboutSection::all_sections();
-        assert_eq!(sections.len(), 9);
+        assert_eq!(sections.len(), 8);
     }
 }

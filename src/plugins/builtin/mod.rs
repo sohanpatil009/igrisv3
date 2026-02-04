@@ -10,7 +10,6 @@ mod creative;
 mod gaming;
 mod editors;
 mod camera;
-mod file_share;
 mod files;
 mod reminders;
 mod system_control;
@@ -29,7 +28,6 @@ pub fn get_builtin_plugins() -> Vec<Plugin> {
         gaming::plugin(),
         editors::plugin(),
         camera::plugin(),
-        file_share::plugin(),
         files::plugin(),
         reminders::plugin(),
         system_control::plugin(),

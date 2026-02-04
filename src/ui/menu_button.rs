@@ -2,10 +2,12 @@
 // Menu button with dropdown for settings and file share
 
 use dioxus::prelude::*;
-use super::file_share_panel::FILE_SHARE_STATE;
 
 #[component]
-pub fn MenuButton(settings_open: Signal<bool>) -> Element {
+pub fn MenuButton(
+    settings_open: Signal<bool>,
+    file_share_open: Signal<bool>,
+) -> Element {
     let mut menu_open = use_signal(|| false);
 
     rsx! {
@@ -26,16 +28,20 @@ pub fn MenuButton(settings_open: Signal<bool>) -> Element {
                     
                     // File Share option
                     button {
-                        style: "width: 100%; background: transparent; border: none; color: white; padding: 16px 20px; text-align: left; cursor: pointer; font-size: 15px; display: flex; align-items: center; gap: 12px; transition: background 0.2s; border-bottom: 1px solid rgba(255, 255, 255, 0.05);",
+                        style: "width: 100%; background: transparent; border: none; color: white; padding: 16px 20px; text-align: left; cursor: pointer; font-size: 15px; display: flex; align-items: center; gap: 12px; transition: background 0.2s;",
                         onclick: move |_| {
                             menu_open.set(false);
-                            let mut state = FILE_SHARE_STATE.lock().unwrap();
-                            state.is_open = true;
+                            file_share_open.set(true);
                         },
-                        span { style: "font-size: 20px;", "📡" }
+                        span { style: "font-size: 20px;", "📁" }
                         span { "File Share" }
                     }
-
+                    
+                    // Divider
+                    div {
+                        style: "height: 1px; background: rgba(255, 255, 255, 0.1); margin: 4px 0;"
+                    }
+                    
                     // Settings option
                     button {
                         style: "width: 100%; background: transparent; border: none; color: white; padding: 16px 20px; text-align: left; cursor: pointer; font-size: 15px; display: flex; align-items: center; gap: 12px; transition: background 0.2s;",
