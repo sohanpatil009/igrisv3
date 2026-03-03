@@ -41,6 +41,18 @@ pub mod media;
 // P2P File sharing system - LocalSend Protocol Implementation
 pub mod file_share;
 
+// File share client for Go backend
+pub mod file_share_client;
+
+// Go backend manager
+pub mod go_backend;
+
+// File share notifications
+pub mod file_share_notifications;
+
+// File share history
+pub mod file_share_history;
+
 // Global state for search results UI (shared across modules)
 #[derive(Clone, Debug, Default)]
 pub struct SearchState {

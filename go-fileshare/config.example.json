@@ -1,0 +1,9 @@
+{
+  "device_name": "IGRIS",
+  "port": 53317,
+  "download_dir": "./downloads",
+  "auto_accept_trusted": false,
+  "max_transfer_size": 10737418240,
+  "chunk_size": 65536,
+  "enabled": true
+}

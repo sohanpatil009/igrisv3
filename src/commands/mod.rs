@@ -8,6 +8,7 @@ pub mod web;
 pub mod ffmpeg_camera;
 pub mod about;
 pub mod reminders;
+pub mod file_share;
 
 // Re-exports for utilities (app launching now handled by plugin system)
 pub use app_utils::{close_all_apps, list_running_apps, get_tracked_app_count};
@@ -17,3 +18,4 @@ pub use web::{process_search_command, is_search_command, search_in_browser, sear
 pub use ffmpeg_camera::handle_camera_command;
 pub use about::{handle_about_command, is_about_command};
 pub use reminders::{handle_alarm_command, handle_reminder_command};
+pub use file_share::handle_file_share_command;

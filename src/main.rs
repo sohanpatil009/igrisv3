@@ -8,19 +8,13 @@ use dioxus::prelude::*;
 use std::path::PathBuf;
 use tokio::sync::{mpsc, RwLock};
 
-// New organized module structure
-mod config;
-mod ui;
-mod core;
-mod nlu;
-mod commands;
-mod plugins;
-mod utils;
-mod platform;
-mod platform_utils;
-mod setup_manager;
-mod media;
-mod file_share;
+// Import from library
+use igrisv3::{
+    config, ui, core, nlu, commands, plugins, utils, platform, platform_utils,
+    setup_manager, media, file_share,
+    file_share_client, file_share_notifications, file_share_history, go_backend,
+    SearchState, SearchResultData, SEARCH_STATE,
+};
 
 use dioxus::desktop::{Config, WindowBuilder};
 use core::audio_capture::{capture_audio_vad, CaptureConfig};
@@ -41,10 +35,7 @@ use ui::{SettingsPanel, MenuButton, SearchResultsPanel, SearchResultItem, Camera
 static ASSISTANT_STATE: once_cell::sync::Lazy<Arc<Mutex<AssistantState>>> =
     once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(AssistantState::default())));
 
-// Re-export search state from lib for UI sync
-use igrisv3::{SearchState, SearchResultData, SEARCH_STATE};
-
-// Camera panel state - use directly from commands module (not from igrisv3 crate)
+// Camera panel state - use directly from commands module
 use commands::ffmpeg_camera::{CameraPanelState, CAMERA_PANEL_STATE};
 
 
@@ -79,6 +70,17 @@ impl Default for AssistantState {
 }
 
 fn main() {
+    // Start Go file share backend
+    println!("[STARTUP] Starting Go file share backend...");
+    match go_backend::start_go_backend() {
+        Ok(_) => println!("[STARTUP] ✓ Go backend started successfully"),
+        Err(e) => {
+            eprintln!("[STARTUP] ⚠️ Failed to start Go backend: {}", e);
+            eprintln!("[STARTUP] File sharing will not be available");
+            eprintln!("[STARTUP] To enable: cd go-fileshare && ./build.sh");
+        }
+    }
+    
     // Register global hotkey (Ctrl+Shift+Space)
     if let Err(e) = utils::hotkey::register_global_hotkey(|| {
         println!("[HOTKEY] Ctrl+Shift+Space pressed - Activating IGRIS");
@@ -735,6 +737,9 @@ async fn process_voice_command(
                             vec![],
                         );
                         
+                        // Cleanup Go backend
+                        igrisv3::go_backend::stop_go_backend();
+                        
                         // Exit the entire application
                         std::process::exit(0);
                     }
@@ -862,6 +867,27 @@ async fn process_voice_command(
                             add_log(&format!("About error: {}", e), LogLevel::Error);
                         }
                     }
+                    return Ok(false);
+                }
+                "file_share_devices" | "file_share_send" | "file_share_transfers" | "file_share_cancel" => {
+                    add_log(&format!("File share command: {}", intent_result.intent_name), LogLevel::Info);
+                    
+                    let response = commands::handle_file_share_command(
+                        &intent_result.intent_name,
+                        &intent_result.entities,
+                    ).await;
+                    
+                    add_log(&response, LogLevel::Success);
+                    let _ = core::tts::speak(&response);
+                    
+                    // Add to context
+                    nlu::context::add_to_context(
+                        command.to_string(),
+                        response.clone(),
+                        intent_result.intent_name.clone(),
+                        intent_result.entities.values().cloned().collect(),
+                    );
+                    
                     return Ok(false);
                 }
                 _ => {}
@@ -1066,34 +1092,8 @@ fn App() -> Element {
     // Camera panel state
     let mut show_camera_panel = use_signal(|| false);
     
-    // File Share Manager - provide context for FileSharePanel
-    let mut file_share_manager = use_signal(|| None::<Arc<RwLock<file_share::FileShareManager>>>);
-    use_context_provider(|| file_share_manager);
-    
-    // Initialize FileShareManager when app starts
-    use_effect(move || {
-        spawn(async move {
-            match file_share::FileShareManager::new("IGRIS".to_string(), 53317).await {
-                Ok(manager) => {
-                    let manager_arc = Arc::new(RwLock::new(manager));
-                    *file_share_manager.write() = Some(manager_arc.clone());
-                    
-                    // Start the file share service
-                    if let Some(fs) = file_share_manager.read().as_ref() {
-                        let fs_lock = fs.read().await;
-                        if let Err(e) = fs_lock.start().await {
-                            eprintln!("Failed to start file share service: {}", e);
-                        } else {
-                            println!("✓ File Share service started on port 53317");
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Failed to initialize FileShareManager: {}", e);
-                }
-            }
-        });
-    });
+    // Note: File sharing is handled by Go backend (auto-started in main())
+    // No need for FileShareManager context - FileSharePanel uses HTTP client directly
 
     use_effect(move || {
         spawn(async move {

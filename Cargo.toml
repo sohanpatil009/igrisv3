@@ -63,7 +63,7 @@ rustfft = "6.1"
 num-complex = "0.4"
 
 # New dependencies for setup system
-reqwest = { version = "0.11", features = ["stream", "blocking", "json"] }
+reqwest = { version = "0.11", features = ["stream", "blocking", "json", "multipart"] }
 futures = "0.3"
 zip = "0.6"
 scraper = "0.20"
