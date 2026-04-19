@@ -403,61 +403,6 @@ impl NluEngine {
                     "how do you work".into(),
                 ],
             ),
-            Intent::new(
-                "file_share_devices".to_string(),
-                vec![
-                    "show nearby devices".into(),
-                    "list devices".into(),
-                    "show devices".into(),
-                    "find devices".into(),
-                    "scan for devices".into(),
-                    "what devices are nearby".into(),
-                    "show me nearby computers".into(),
-                    "find nearby devices".into(),
-                    "discover devices".into(),
-                    "show available devices".into(),
-                ],
-            ),
-            Intent::new(
-                "file_share_send".to_string(),
-                vec![
-                    "send file".into(),
-                    "share file".into(),
-                    "transfer file".into(),
-                    "send document".into(),
-                    "share document".into(),
-                    "send file to device".into(),
-                    "share with device".into(),
-                    "transfer to laptop".into(),
-                    "send this file".into(),
-                    "share this document".into(),
-                ],
-            ),
-            Intent::new(
-                "file_share_transfers".to_string(),
-                vec![
-                    "show transfers".into(),
-                    "list transfers".into(),
-                    "show file transfers".into(),
-                    "what's transferring".into(),
-                    "show active transfers".into(),
-                    "transfer status".into(),
-                    "show transfer progress".into(),
-                    "what files are sending".into(),
-                ],
-            ),
-            Intent::new(
-                "file_share_cancel".to_string(),
-                vec![
-                    "cancel transfer".into(),
-                    "stop transfer".into(),
-                    "abort transfer".into(),
-                    "cancel file transfer".into(),
-                    "stop sending".into(),
-                    "cancel that transfer".into(),
-                    "stop the transfer".into(),
-                ],
-            ),
         ];
 
         self.intents = intents;

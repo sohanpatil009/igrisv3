@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 #[component]
 pub fn MenuButton(
     settings_open: Signal<bool>,
-    file_share_open: Signal<bool>,
+    localshare_open: Signal<bool>,
 ) -> Element {
     let mut menu_open = use_signal(|| false);
 
@@ -26,15 +26,15 @@ pub fn MenuButton(
                 div {
                     style: "position: absolute; top: 60px; right: 0; background: linear-gradient(135deg, #1e293b 0%, #334155 100%); border-radius: 16px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5); border: 1px solid rgba(255, 255, 255, 0.1); overflow: hidden; min-width: 220px; backdrop-filter: blur(10px);",
                     
-                    // File Share option
+                    // LocalShare option
                     button {
                         style: "width: 100%; background: transparent; border: none; color: white; padding: 16px 20px; text-align: left; cursor: pointer; font-size: 15px; display: flex; align-items: center; gap: 12px; transition: background 0.2s;",
                         onclick: move |_| {
                             menu_open.set(false);
-                            file_share_open.set(true);
+                            localshare_open.set(true);
                         },
                         span { style: "font-size: 20px;", "📁" }
-                        span { "File Share" }
+                        span { "LocalShare" }
                     }
                     
                     // Divider

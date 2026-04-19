@@ -11,8 +11,7 @@ use tokio::sync::{mpsc, RwLock};
 // Import from library
 use igrisv3::{
     config, ui, core, nlu, commands, plugins, utils, platform, platform_utils,
-    setup_manager, media, file_share,
-    file_share_client, file_share_notifications, file_share_history, go_backend,
+    setup_manager, media, localshare,
     SearchState, SearchResultData, SEARCH_STATE,
 };
 
@@ -29,7 +28,7 @@ use core::stt::{init_whisper_context, transcribe_audio};
 use core::tts::TTS_ENGINE;
 use core::wake_word::listen_for_wake_word;
 use config::CONFIG;
-use ui::{SettingsPanel, MenuButton, SearchResultsPanel, SearchResultItem, CameraPanel, PresentationPanel, FileSharePanel};
+use ui::{SettingsPanel, MenuButton, SearchResultsPanel, SearchResultItem, CameraPanel, PresentationPanel, LocalSharePanel};
 
 // Global state for voice assistant
 static ASSISTANT_STATE: once_cell::sync::Lazy<Arc<Mutex<AssistantState>>> =
@@ -70,17 +69,6 @@ impl Default for AssistantState {
 }
 
 fn main() {
-    // Start Go file share backend
-    println!("[STARTUP] Starting Go file share backend...");
-    match go_backend::start_go_backend() {
-        Ok(_) => println!("[STARTUP] ✓ Go backend started successfully"),
-        Err(e) => {
-            eprintln!("[STARTUP] ⚠️ Failed to start Go backend: {}", e);
-            eprintln!("[STARTUP] File sharing will not be available");
-            eprintln!("[STARTUP] To enable: cd go-fileshare && ./build.sh");
-        }
-    }
-    
     // Register global hotkey (Ctrl+Shift+Space)
     if let Err(e) = utils::hotkey::register_global_hotkey(|| {
         println!("[HOTKEY] Ctrl+Shift+Space pressed - Activating IGRIS");
@@ -737,9 +725,6 @@ async fn process_voice_command(
                             vec![],
                         );
                         
-                        // Cleanup Go backend
-                        igrisv3::go_backend::stop_go_backend();
-                        
                         // Exit the entire application
                         std::process::exit(0);
                     }
@@ -867,27 +852,6 @@ async fn process_voice_command(
                             add_log(&format!("About error: {}", e), LogLevel::Error);
                         }
                     }
-                    return Ok(false);
-                }
-                "file_share_devices" | "file_share_send" | "file_share_transfers" | "file_share_cancel" => {
-                    add_log(&format!("File share command: {}", intent_result.intent_name), LogLevel::Info);
-                    
-                    let response = commands::handle_file_share_command(
-                        &intent_result.intent_name,
-                        &intent_result.entities,
-                    ).await;
-                    
-                    add_log(&response, LogLevel::Success);
-                    let _ = core::tts::speak(&response);
-                    
-                    // Add to context
-                    nlu::context::add_to_context(
-                        command.to_string(),
-                        response.clone(),
-                        intent_result.intent_name.clone(),
-                        intent_result.entities.values().cloned().collect(),
-                    );
-                    
                     return Ok(false);
                 }
                 _ => {}
@@ -1069,7 +1033,7 @@ fn App() -> Element {
     let mut setup_in_progress = use_signal(|| true);
     let mut show_setup_gui = use_signal(|| true);
     let show_settings = use_signal(|| false);
-    let mut show_file_share = use_signal(|| false);
+    let mut show_localshare = use_signal(|| false);
     let mut status_text = use_signal(|| "Running First-Time Setup...".to_string());
     let mut last_command_text = use_signal(|| "Waiting for voice input...".to_string());
     let mut assistant_name = use_signal(|| CONFIG.assistant_name());
@@ -1217,17 +1181,17 @@ fn App() -> Element {
         // Settings Panel (modal)
         SettingsPanel { is_open: show_settings }
 
-        // File Share Panel (modal)
-        if show_file_share() {
+        // LocalShare Panel (modal)
+        if show_localshare() {
             div {
                 style: "position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 100; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px);",
-                onclick: move |_| show_file_share.set(false),
+                onclick: move |_| show_localshare.set(false),
                 
                 div {
-                    style: "position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 1200px; max-height: 90vh; overflow: auto; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.5);",
+                    style: "position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 800px; max-height: 90vh; overflow: auto; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.5);",
                     onclick: move |e| e.stop_propagation(),
                     
-                    FileSharePanel {}
+                    LocalSharePanel {}
                 }
             }
         }
@@ -1284,7 +1248,7 @@ fn App() -> Element {
                 // Menu Button (top right)
                 MenuButton { 
                     settings_open: show_settings,
-                    file_share_open: show_file_share
+                    localshare_open: show_localshare
                 }
 
                 // Central Animated Panel
