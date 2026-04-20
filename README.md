@@ -4,6 +4,19 @@ A powerful, fully offline voice-activated AI assistant built with Rust and Dioxu
 
 ![IGRIS](icons/igris_icon.svg)
 
+## 🎉 Recent Updates (April 2026)
+
+### FastSwap File Transfer - Complete Implementation
+- ✅ **Incoming Transfer Popup** - Full-screen modal appears when receiving files
+- ✅ **Approval Flow** - Receiver must explicitly accept/deny transfers
+- ✅ **Server-Side Polling** - Sender waits up to 60 seconds for receiver approval
+- ✅ **Receiver Progress Tracking** - Real-time progress bars for incoming files
+- ✅ **Folder Selection** - Send entire folders with recursive scanning
+- ✅ **Enhanced UI** - Modern gradient design with status indicators
+- ✅ **Error Handling** - Graceful handling of denied/timed-out transfers
+
+**What This Means**: FastSwap now provides a complete, secure file sharing experience with explicit user consent and real-time feedback for both sender and receiver!
+
 ## 🎯 Key Features
 
 ### 🎤 Voice Processing Pipeline
@@ -30,9 +43,13 @@ A powerful, fully offline voice-activated AI assistant built with Rust and Dioxu
 ### ⚡ FastSwap File Transfer
 - **Cross-Platform Sharing** - Compatible with LocalSend v2.0 protocol
 - **Network Discovery** - Automatic device scanning on local network
-- **Real-Time Progress** - Live transfer progress with speed and ETA
-- **Multi-File Support** - Send multiple files with per-file progress tracking
-- **Modern UI** - Dark gradient interface with animated progress bars
+- **Approval Flow** - Receiver must explicitly accept/deny incoming transfers
+- **Incoming Transfer Popup** - Full-screen modal with sender info and file preview
+- **Real-Time Progress** - Live transfer progress for both sender and receiver
+- **Multi-File Support** - Send multiple files/folders with per-file progress tracking
+- **Folder Selection** - Recursive scanning of all subfolders
+- **Transfer Control** - Cancel transfers in progress, 60-second approval timeout
+- **Modern UI** - Dark gradient interface with animated progress bars and status indicators
 
 ### 🔌 Plugin System
 - **Built-in Plugins** - Browsers, utilities, media, office, gaming, creative apps, system control, reminders
@@ -134,9 +151,11 @@ First launch automatically downloads:
 ```
 *Click menu button to access file sharing panel*
 - Scan for nearby devices on local network
-- Select files to send with visual file picker
-- Monitor transfer progress with real-time updates
+- Select files/folders to send with visual file picker
+- Receiver gets popup to accept/deny incoming transfers
+- Monitor transfer progress with real-time updates (both sender and receiver)
 - Cancel transfers in progress
+- 60-second timeout for approval
 - Compatible with LocalSend apps on mobile/desktop
 
 ### Assistant
@@ -181,6 +200,7 @@ src/
 │   ├── settings.rs      # Settings panel
 │   ├── camera_panel.rs  # Camera UI
 │   ├── fastswap_panel.rs # File sharing UI
+│   ├── incoming_transfer_popup.rs # Transfer approval popup
 │   └── presentation/    # Self-presentation UI
 ├── fastswap/          # File transfer module
 │   ├── models/          # Device, transfer, progress models
@@ -251,7 +271,9 @@ cargo test
 | Volume/Brightness not working | Windows: May need nircmd.exe in PATH or admin privileges |
 | Alarm not triggering | Check system time, background thread runs every 10 seconds |
 | FastSwap not finding devices | Ensure devices on same network, check firewall allows port 53317 |
-| File transfer fails | Check network stability, recipient may have rejected transfer |
+| File transfer fails | Check network stability, ensure receiver accepted the transfer |
+| Transfer popup not appearing | Check if pending transfers are being polled (200ms interval) |
+| Progress not updating | Verify global progress tracker is initialized for both sender/receiver |
 
 ## 📝 License
 
@@ -275,8 +297,11 @@ MIT License - see LICENSE file.
 - [x] Dynamic camera/mic detection
 - [x] Smart command validation & fallback
 - [x] FastSwap file transfer with real-time progress
+- [x] Incoming transfer approval popup with sender info
+- [x] Receiver-side progress tracking
+- [x] Folder selection with recursive scanning
+- [x] Server-side polling for transfer approval (60s timeout)
 - [ ] Voice-activated file sharing
-- [ ] File receive notifications
 - [ ] Transfer history persistence
 - [ ] Multi-language support
 - [ ] Custom wake word training
