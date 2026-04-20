@@ -56,25 +56,25 @@ class HandFreeMouse:
         default_config = {
             "camera": {
                 "device_id": 0,
-                "width": 640,
-                "height": 480,
+                "width": 320,  # Reduced for better performance
+                "height": 240,  # Reduced for better performance
                 "fps": 30
             },
             "tracking": {
-                "min_detection_confidence": 0.7,
-                "min_tracking_confidence": 0.5,
+                "min_detection_confidence": 0.5,  # Lowered for faster detection
+                "min_tracking_confidence": 0.3,  # Lowered for faster tracking
                 "max_num_hands": 1
             },
             "mouse": {
-                "smoothing": 0.5,
-                "sensitivity": 1.0,
+                "smoothing": 0.7,  # Increased for smoother movement
+                "sensitivity": 1.5,  # Increased for faster response
                 "click_threshold": 0.03,
-                "scroll_speed": 20
+                "scroll_speed": 30  # Increased for faster scrolling
             },
             "gestures": {
-                "pinch_threshold": 0.05,
-                "swipe_threshold": 0.15,
-                "hold_duration_ms": 500
+                "pinch_threshold": 0.08,  # Slightly increased for reliability
+                "swipe_threshold": 0.12,  # Slightly decreased for faster detection
+                "hold_duration_ms": 300  # Reduced for faster drag
             }
         }
         

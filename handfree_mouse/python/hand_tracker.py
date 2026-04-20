@@ -71,135 +71,108 @@ class HandTracker:
             self.frame_count = 0
             self.last_time = current_time
         
-        annotated_frame = frame.copy()
-        
-        # For now, use a simple color-based hand detection
-        # This is a fallback until we can properly configure MediaPipe 0.10+
+        # Detect hands (optimized)
         hand_landmarks_list = self._simple_hand_detection(frame)
         
-        # Draw detected points
-        if hand_landmarks_list:
-            for landmarks in hand_landmarks_list:
-                h, w = frame.shape[:2]
-                
-                # Draw landmarks
-                for i, landmark in enumerate(landmarks):
-                    x = int(landmark['x'] * w)
-                    y = int(landmark['y'] * h)
-                    
-                    # Different colors for different fingers
-                    if i == 4:  # Thumb tip
-                        color = (255, 0, 0)  # Blue
-                    elif i == 8:  # Index tip
-                        color = (0, 255, 0)  # Green
-                    elif i == 12:  # Middle tip
-                        color = (0, 255, 255)  # Yellow
-                    else:
-                        color = (255, 255, 255)  # White
-                    
-                    cv2.circle(annotated_frame, (x, y), 5, color, -1)
-                
-                # Draw connections
-                for connection in self.HAND_CONNECTIONS:
-                    start_idx, end_idx = connection
-                    if start_idx < len(landmarks) and end_idx < len(landmarks):
-                        start = landmarks[start_idx]
-                        end = landmarks[end_idx]
-                        start_point = (int(start['x'] * w), int(start['y'] * h))
-                        end_point = (int(end['x'] * w), int(end['y'] * h))
-                        cv2.line(annotated_frame, start_point, end_point, (0, 255, 0), 2)
-        
-        # Draw FPS and status
-        cv2.putText(
-            annotated_frame,
-            f"FPS: {self.fps}",
-            (10, 30),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1,
-            (0, 255, 0),
-            2
-        )
-        
-        cv2.putText(
-            annotated_frame,
-            "Simple Detection Mode",
-            (10, 60),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (0, 255, 255),
-            2
-        )
+        # Only create annotated frame if needed (for UI mode)
+        annotated_frame = frame
         
         return annotated_frame, hand_landmarks_list if hand_landmarks_list else None
     
     def _simple_hand_detection(self, frame: np.ndarray) -> Optional[List]:
         """
-        Simple hand detection using skin color and contours
+        Optimized hand detection using skin color and contours
         Returns approximate hand landmarks
         """
-        # Convert to HSV for skin detection
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        # Resize frame for faster processing
+        small_frame = cv2.resize(frame, (320, 240))
         
-        # Define skin color range (adjust for different skin tones)
-        lower_skin = np.array([0, 20, 70], dtype=np.uint8)
-        upper_skin = np.array([20, 255, 255], dtype=np.uint8)
+        # Convert to YCrCb color space (better for skin detection)
+        ycrcb = cv2.cvtColor(small_frame, cv2.COLOR_BGR2YCrCb)
+        
+        # Skin color range in YCrCb
+        lower_skin = np.array([0, 133, 77], dtype=np.uint8)
+        upper_skin = np.array([255, 173, 127], dtype=np.uint8)
         
         # Create mask
-        mask = cv2.inRange(hsv, lower_skin, upper_skin)
+        mask = cv2.inRange(ycrcb, lower_skin, upper_skin)
         
-        # Apply morphological operations
-        kernel = np.ones((5, 5), np.uint8)
-        mask = cv2.erode(mask, kernel, iterations=1)
-        mask = cv2.dilate(mask, kernel, iterations=2)
+        # Fast morphological operations
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
         
-        # Find contours
+        # Find contours (faster with RETR_EXTERNAL)
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         if not contours:
             return None
         
-        # Get largest contour (assumed to be hand)
+        # Get largest contour
         largest_contour = max(contours, key=cv2.contourArea)
+        area = cv2.contourArea(largest_contour)
         
-        if cv2.contourArea(largest_contour) < 5000:  # Minimum area threshold
+        if area < 2000:  # Minimum area threshold (adjusted for smaller frame)
             return None
         
-        # Get bounding box and center
-        x, y, w, h = cv2.boundingRect(largest_contour)
+        # Get convex hull for better hand shape
+        hull = cv2.convexHull(largest_contour)
+        
+        # Get bounding box
+        x, y, w, h = cv2.boundingRect(hull)
+        
+        # Scale back to original frame size
+        scale_x = frame.shape[1] / 320
+        scale_y = frame.shape[0] / 240
+        x = int(x * scale_x)
+        y = int(y * scale_y)
+        w = int(w * scale_x)
+        h = int(h * scale_y)
+        
+        # Calculate key points
         center_x = x + w // 2
         center_y = y + h // 2
+        top_y = y
+        bottom_y = y + h
         
-        # Create approximate 21-point hand landmarks
-        # This is a simplified version - just enough for basic gestures
+        # Create approximate 21-point hand landmarks (optimized)
         landmarks = []
         frame_h, frame_w = frame.shape[:2]
         
         # Normalize coordinates
         def normalize(px, py):
-            return {'x': px / frame_w, 'y': py / frame_h, 'z': 0.0}
+            return {
+                'x': max(0, min(1, px / frame_w)),
+                'y': max(0, min(1, py / frame_h)),
+                'z': 0.0
+            }
         
         # Wrist (0)
-        landmarks.append(normalize(center_x, y + h))
+        landmarks.append(normalize(center_x, bottom_y))
         
-        # Thumb (1-4)
+        # Thumb (1-4) - left side
+        thumb_x = x + int(w * 0.15)
         for i in range(4):
-            landmarks.append(normalize(x + w * 0.2, y + h - i * h * 0.2))
+            landmarks.append(normalize(thumb_x, bottom_y - int(i * h * 0.22)))
         
-        # Index finger (5-8)
+        # Index finger (5-8) - pointing up
+        index_x = x + int(w * 0.35)
         for i in range(4):
-            landmarks.append(normalize(x + w * 0.4, y + h - i * h * 0.25))
+            landmarks.append(normalize(index_x, bottom_y - int(i * h * 0.28)))
         
-        # Middle finger (9-12)
+        # Middle finger (9-12) - center, tallest
         for i in range(4):
-            landmarks.append(normalize(center_x, y + h - i * h * 0.25))
+            landmarks.append(normalize(center_x, bottom_y - int(i * h * 0.30)))
         
         # Ring finger (13-16)
+        ring_x = x + int(w * 0.65)
         for i in range(4):
-            landmarks.append(normalize(x + w * 0.6, y + h - i * h * 0.25))
+            landmarks.append(normalize(ring_x, bottom_y - int(i * h * 0.28)))
         
-        # Pinky (17-20)
+        # Pinky (17-20) - right side, shortest
+        pinky_x = x + int(w * 0.85)
         for i in range(4):
-            landmarks.append(normalize(x + w * 0.8, y + h - i * h * 0.2))
+            landmarks.append(normalize(pinky_x, bottom_y - int(i * h * 0.22)))
         
         return [landmarks]
     
