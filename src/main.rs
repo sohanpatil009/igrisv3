@@ -559,6 +559,7 @@ async fn process_voice_command(
     // Check for FastSwap / file sharing commands
     if cmd_lower.contains("fastswap") 
         || cmd_lower.contains("fast swap")
+        || cmd_lower.contains("start fastswap")
         || cmd_lower.contains("share files")
         || cmd_lower.contains("file sharing")
         || cmd_lower.contains("open share")
