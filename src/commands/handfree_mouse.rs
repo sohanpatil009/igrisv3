@@ -59,12 +59,38 @@ fn start_handfree_mouse() -> Result<String> {
         ));
     }
     
-    // Start Python process
-    let child = Command::new(python_cmd)
+    // Start Python process with stdout/stderr capture
+    let mut child = Command::new(python_cmd)
         .arg(script_path)
         .arg("--no-ui")  // Run without UI window
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| anyhow::anyhow!("Failed to start HandFree Mouse: {}", e))?;
+    
+    // Spawn thread to read stdout and speak status messages
+    if let Some(stdout) = child.stdout.take() {
+        std::thread::spawn(move || {
+            use std::io::{BufRead, BufReader};
+            let reader = BufReader::new(stdout);
+            
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    // Check for status messages
+                    if line.starts_with("[IGRIS_STATUS]") {
+                        let message = line.strip_prefix("[IGRIS_STATUS]").unwrap_or("").trim();
+                        tracing::info!("[HandFree Mouse] {}", message);
+                        
+                        // Speak the message via TTS
+                        let _ = crate::core::tts::speak(message);
+                    } else {
+                        // Regular log output
+                        tracing::debug!("[HandFree Mouse] {}", line);
+                    }
+                }
+            }
+        });
+    }
     
     *process_guard = Some(child);
     *enabled_guard = true;

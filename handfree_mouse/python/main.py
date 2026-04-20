@@ -6,10 +6,16 @@ Integrates hand tracking, gesture recognition, and mouse control
 import cv2
 import json
 import argparse
+import sys
 from pathlib import Path
 from hand_tracker import HandTracker
 from gesture_recognizer import GestureRecognizer, Gesture
 from mouse_controller import MouseController
+
+
+def send_status(message: str):
+    """Send status message to IGRIS via stdout"""
+    print(f"[IGRIS_STATUS] {message}", flush=True)
 
 
 class HandFreeMouse:
@@ -48,6 +54,7 @@ class HandFreeMouse:
         self.is_paused = False
         self.show_ui = True
         
+        send_status("HandFree Mouse initialized successfully")
         print("HandFree Mouse initialized")
         print("Press 'q' to quit, 'p' to pause/resume, 'h' to hide/show UI")
     
@@ -102,11 +109,14 @@ class HandFreeMouse:
         cap.set(cv2.CAP_PROP_FPS, self.config['camera']['fps'])
         
         if not cap.isOpened():
+            send_status("Error: Could not open camera")
             print("Error: Could not open camera")
             return
         
+        send_status("Camera opened successfully. Hand tracking active.")
         self.is_running = True
         prev_hand_y = None
+        gesture_count = 0
         
         try:
             while self.is_running:
@@ -138,6 +148,11 @@ class HandFreeMouse:
                     # Handle gesture
                     if stable_gesture != Gesture.NONE:
                         self.controller.handle_gesture(stable_gesture)
+                        
+                        # Send gesture feedback every 10 gestures to avoid spam
+                        gesture_count += 1
+                        if gesture_count % 10 == 0:
+                            send_status(f"Gesture detected: {stable_gesture.value}")
                     
                     # Handle scroll with open palm
                     if stable_gesture == Gesture.OPEN_PALM:
@@ -184,9 +199,12 @@ class HandFreeMouse:
                 # Handle keyboard input
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q'):
+                    send_status("HandFree Mouse stopping")
                     break
                 elif key == ord('p'):
                     self.is_paused = not self.is_paused
+                    status = "paused" if self.is_paused else "resumed"
+                    send_status(f"HandFree Mouse {status}")
                     print(f"{'Paused' if self.is_paused else 'Resumed'}")
                 elif key == ord('h'):
                     self.show_ui = not self.show_ui
@@ -203,6 +221,7 @@ class HandFreeMouse:
         self.is_running = False
         self.controller.reset_state()
         self.tracker.close()
+        send_status("HandFree Mouse stopped successfully")
         print("HandFree Mouse stopped")
 
 
