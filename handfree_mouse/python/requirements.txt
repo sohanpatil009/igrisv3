@@ -1,17 +1,19 @@
 # HandFree Mouse - Python Dependencies
 
-# Computer Vision
+# Computer Vision (Required)
 opencv-python>=4.8.0
-mediapipe>=0.10.0
 numpy>=1.24.0
 
-# Mouse Control
+# Hand Tracking (Optional - using OpenCV fallback)
+# mediapipe>=0.10.0
+
+# Mouse Control (Required)
 pyautogui>=0.9.54
 pynput>=1.7.6
 
-# System Control
+# System Control (Optional)
 screen-brightness-control>=0.20.0  # Brightness control
 pycaw>=20230407  # Windows audio control (optional)
 
-# Utilities
+# Utilities (Required)
 pillow>=10.0.0

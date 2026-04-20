@@ -1,6 +1,6 @@
 """
 HandFree Mouse - Hand Tracking Engine
-Uses MediaPipe Tasks API for real-time hand landmark detection
+Uses OpenCV for hand detection (MediaPipe-free fallback)
 """
 
 import cv2
@@ -8,20 +8,9 @@ import numpy as np
 from typing import Optional, Tuple, List
 import time
 
-# Import MediaPipe
-try:
-    import mediapipe as mp
-    from mediapipe.tasks import python
-    from mediapipe.tasks.python import vision
-    from mediapipe.framework.formats import landmark_pb2
-    MEDIAPIPE_AVAILABLE = True
-except ImportError as e:
-    print(f"MediaPipe import error: {e}")
-    MEDIAPIPE_AVAILABLE = False
-
 
 class HandTracker:
-    """Real-time hand tracking using MediaPipe Tasks API"""
+    """Real-time hand tracking using OpenCV"""
     
     def __init__(
         self,
@@ -37,22 +26,12 @@ class HandTracker:
             min_tracking_confidence: Minimum confidence for hand tracking
             max_num_hands: Maximum number of hands to track
         """
-        if not MEDIAPIPE_AVAILABLE:
-            raise RuntimeError("MediaPipe is not available. Please install: pip install mediapipe")
-        
-        # MediaPipe 0.10+ uses Tasks API without pre-trained models
-        # We'll use a simpler approach with video mode
         self.max_num_hands = max_num_hands
         self.min_detection_confidence = min_detection_confidence
         self.min_tracking_confidence = min_tracking_confidence
         
-        # For MediaPipe 0.10+, we need to use the video/live stream mode
-        # Since hand_landmarker.task model is not included, we'll use a workaround
-        self.hands = None
-        self.use_simple_detection = True
-        
-        print(f"[HandTracker] Initialized with MediaPipe {mp.__version__}")
-        print("[HandTracker] Using simplified hand detection")
+        print("[HandTracker] Using OpenCV-based hand detection")
+        print("[HandTracker] No MediaPipe required")
         
         self.results = None
         self.frame_count = 0
