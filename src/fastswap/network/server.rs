@@ -160,7 +160,16 @@ async fn confirm_upload_handler(
     session.confirmed = true;
     session.status = TransferStatus::Transferring;
     
-    tracing::info!("✅ Upload confirmed for session: {}", request.session_id);
+    // Initialize progress tracking for receiver
+    let file_progresses: Vec<FileProgress> = session.files.iter().map(|f| {
+        FileProgress::new(f.id.clone(), f.name.clone(), f.size)
+    }).collect();
+    
+    let transfer_progress = TransferProgress::new(request.session_id.clone(), file_progresses);
+    let tracker = crate::fastswap::get_progress_tracker();
+    tracker.write().await.insert(request.session_id.clone(), transfer_progress);
+    
+    tracing::info!("✅ Upload confirmed for session: {} - Progress tracking initialized", request.session_id);
     
     Ok(Json(ConfirmUploadResponse {
         status: "ready".to_string(),
@@ -229,11 +238,46 @@ async fn upload_handler(
     let file_path = download_dir.join(&file.name);
     tracing::info!("Saving file to: {:?}", file_path);
     
+    // Clone IDs for error handling
+    let session_id_for_error = query.session_id.clone();
+    let file_id_for_error = query.file_id.clone();
+    
+    // Update progress - mark as transferring
+    {
+        let tracker = crate::fastswap::get_progress_tracker();
+        let mut guard = tracker.write().await;
+        if let Some(progress) = guard.get_mut(&query.session_id) {
+            progress.update_file_progress(&query.file_id, body.len() as u64);
+        }
+    }
+    
     // Write file
     tokio::fs::write(&file_path, &body).await.map_err(|e| {
         tracing::error!("Failed to write file: {}", e);
+        
+        // Mark as failed in progress tracker
+        let tracker = crate::fastswap::get_progress_tracker();
+        let session_id = session_id_for_error.clone();
+        let file_id = file_id_for_error.clone();
+        let error_msg = e.to_string();
+        tokio::spawn(async move {
+            let mut guard = tracker.write().await;
+            if let Some(progress) = guard.get_mut(&session_id) {
+                progress.mark_file_failed(&file_id, error_msg);
+            }
+        });
+        
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+    
+    // Mark file as completed
+    {
+        let tracker = crate::fastswap::get_progress_tracker();
+        let mut guard = tracker.write().await;
+        if let Some(progress) = guard.get_mut(&query.session_id) {
+            progress.mark_file_completed(&query.file_id);
+        }
+    }
     
     tracing::info!("✅ File saved successfully: {:?} ({} bytes)", file_path, body.len());
     Ok(StatusCode::OK)
