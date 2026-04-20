@@ -13,6 +13,7 @@ mod camera;
 mod files;
 mod reminders;
 mod system_control;
+mod handfree_mouse;
 
 use super::{ActionType, Plugin, PluginCommand, PluginMetadata};
 
@@ -31,6 +32,7 @@ pub fn get_builtin_plugins() -> Vec<Plugin> {
         files::plugin(),
         reminders::plugin(),
         system_control::plugin(),
+        handfree_mouse::plugin(),
     ]
 }
 

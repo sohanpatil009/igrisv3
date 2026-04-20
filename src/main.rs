@@ -499,6 +499,9 @@ async fn process_voice_command(
         add_log("Exit command received - Shutting down IGRIS", LogLevel::Success);
         let _ = core::tts::speak("Goodbye! Thank you for using IGRIS. See you next time.");
         
+        // Cleanup HandFree Mouse if running
+        commands::handfree_mouse::cleanup_handfree_mouse();
+        
         // Give audio time to play
         std::thread::sleep(std::time::Duration::from_millis(1500));
         
@@ -697,6 +700,21 @@ async fn process_voice_command(
                         } else {
                             add_log("System command failed", LogLevel::Error);
                             let _ = core::tts::speak("I couldn't execute that system command");
+                        }
+                        return Ok(false);
+                    }
+                    
+                    // Handle HandFree Mouse commands
+                    if action.starts_with("handfree_") {
+                        match commands::handfree_mouse::handle_handfree_command(command_to_use) {
+                            Ok(msg) => {
+                                add_log(&msg, LogLevel::Success);
+                                let _ = core::tts::speak(&msg);
+                            }
+                            Err(e) => {
+                                add_log(&format!("HandFree Mouse error: {}", e), LogLevel::Error);
+                                let _ = core::tts::speak(&format!("HandFree Mouse error: {}", e));
+                            }
                         }
                         return Ok(false);
                     }
