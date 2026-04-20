@@ -1,0 +1,6 @@
+# Ignore everything in this directory
+# This is a cloned repository used for LocalShare implementation reference
+*
+
+# But don't ignore this .gitignore file itself
+!.gitignore

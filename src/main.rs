@@ -34,6 +34,19 @@ use ui::{SettingsPanel, MenuButton, SearchResultsPanel, SearchResultItem, Camera
 static ASSISTANT_STATE: once_cell::sync::Lazy<Arc<Mutex<AssistantState>>> =
     once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(AssistantState::default())));
 
+// Global LocalShare manager to keep it alive
+static LOCALSHARE_MANAGER: once_cell::sync::Lazy<Arc<Mutex<Option<localshare::LocalShareManager>>>> =
+    once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(None)));
+
+// Global UI state for voice-triggered panels
+static UI_PANEL_STATE: once_cell::sync::Lazy<Arc<Mutex<UiPanelState>>> =
+    once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(UiPanelState::default())));
+
+#[derive(Default)]
+struct UiPanelState {
+    show_localshare: bool,
+}
+
 // Camera panel state - use directly from commands module
 use commands::ffmpeg_camera::{CameraPanelState, CAMERA_PANEL_STATE};
 
@@ -278,6 +291,32 @@ async fn start_voice_assistant() {
     // Initialize app monitoring (now handled by plugin system)
     add_log("Application plugin system initialized", LogLevel::Info);
 
+    // Initialize LocalShare file sharing server
+    add_log("Starting LocalShare file sharing server...", LogLevel::Info);
+    let local_ip = local_ip_address::local_ip()
+        .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 100)))
+        .to_string();
+    let local_device = localshare::Device::new_local(
+        format!("IGRIS-{}", whoami::username()),
+        53317,
+        local_ip.clone()
+    );
+    
+    let mut localshare_manager = localshare::LocalShareManager::new(53317);
+    match localshare_manager.start(local_device).await {
+        Ok(_) => {
+            add_log(&format!("LocalShare server started on {} (port 53317)", local_ip), LogLevel::Success);
+            // Store the manager to keep it alive
+            if let Ok(mut manager_guard) = LOCALSHARE_MANAGER.lock() {
+                *manager_guard = Some(localshare_manager);
+            }
+        }
+        Err(e) => {
+            add_log(&format!("LocalShare server failed to start: {}", e), LogLevel::Warning);
+            add_log("File sharing will not be available", LogLevel::Warning);
+        }
+    }
+
     let whisper_ctx = match init_whisper_context() {
         Ok(ctx) => {
             update_status("Initialized - Waiting for wake word");
@@ -511,6 +550,25 @@ async fn process_voice_command(
                 add_log(&format!("About error: {}", e), LogLevel::Error);
             }
         }
+        return Ok(false);
+    }
+    
+    // Check for LocalShare / file sharing commands
+    if cmd_lower.contains("localshare") 
+        || cmd_lower.contains("local share")
+        || cmd_lower.contains("share files")
+        || cmd_lower.contains("file sharing")
+        || cmd_lower.contains("open share")
+        || cmd_lower.contains("file share") {
+        add_log("LocalShare command detected", LogLevel::Info);
+        let _ = core::tts::speak("Opening LocalShare file sharing interface");
+        
+        // Set the global UI state to show LocalShare
+        if let Ok(mut ui_state) = UI_PANEL_STATE.lock() {
+            ui_state.show_localshare = true;
+        }
+        
+        add_log("LocalShare interface opened", LogLevel::Success);
         return Ok(false);
     }
     
@@ -1056,8 +1114,7 @@ fn App() -> Element {
     // Camera panel state
     let mut show_camera_panel = use_signal(|| false);
     
-    // Note: File sharing is handled by Go backend (auto-started in main())
-    // No need for FileShareManager context - FileSharePanel uses HTTP client directly
+    // Note: File sharing is handled by LocalShare (integrated Rust implementation)
 
     use_effect(move || {
         spawn(async move {
@@ -1114,6 +1171,14 @@ fn App() -> Element {
                         println!("[UI] Camera panel state changed: {}", is_open);
                     }
                     show_camera_panel.set(is_open);
+                }
+                
+                // Update LocalShare panel state from global (voice commands)
+                if let Ok(mut ui_state) = UI_PANEL_STATE.lock() {
+                    if ui_state.show_localshare && !show_localshare() {
+                        show_localshare.set(true);
+                        ui_state.show_localshare = false; // Reset after triggering
+                    }
                 }
             }
         });
