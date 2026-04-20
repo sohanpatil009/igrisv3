@@ -68,6 +68,19 @@ async fn prepare_upload_handler(
         });
     }
     
+    // Create pending transfer for UI approval
+    let pending = crate::fastswap::PendingTransfer {
+        session_id: session_id.clone(),
+        sender_name: request.info.alias.clone(),
+        sender_device: request.info.device_model.clone(),
+        file_count: request.files.len(),
+        total_size: request.files.iter().map(|f| f.size).sum(),
+        files: request.files.iter().map(|f| f.file_name.clone()).collect(),
+    };
+    
+    crate::fastswap::add_pending_transfer(pending).await;
+    tracing::info!("Added pending transfer for approval: {}", session_id);
+    
     // Store session
     let transfer_state = TransferState {
         session_id: session_id.clone(),
@@ -100,6 +113,12 @@ async fn confirm_upload_handler(
     Json(request): Json<ConfirmUploadRequest>,
 ) -> Result<Json<ConfirmUploadResponse>, StatusCode> {
     tracing::info!("Confirming upload for session: {}", request.session_id);
+    
+    // Check if transfer is approved by user
+    if !crate::fastswap::is_transfer_approved(&request.session_id).await {
+        tracing::warn!("Transfer not approved yet: {}", request.session_id);
+        return Err(StatusCode::FORBIDDEN);
+    }
     
     let mut sessions = state.sessions.write().await;
     let session = sessions.iter_mut()

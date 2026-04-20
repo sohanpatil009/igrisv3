@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use rfd::FileDialog;
-use crate::fastswap::{Device, FileProgress, ProgressStatus, TransferProgress};
+use crate::fastswap::{Device, FileProgress, ProgressStatus, TransferProgress, PendingTransfer};
 use std::path::PathBuf;
 
 #[component]
@@ -10,6 +10,7 @@ pub fn FastSwapPanel() -> Element {
     let mut selected_files = use_signal(|| Vec::<PathBuf>::new());
     let mut selected_device = use_signal(|| None::<Device>);
     let mut active_transfers = use_signal(|| Vec::<TransferProgress>::new());
+    let mut pending_transfers = use_signal(|| Vec::<PendingTransfer>::new());
     let mut status_message = use_signal(|| String::from("FastSwap Ready"));
     let mut current_session = use_signal(|| None::<String>);
 
@@ -46,6 +47,10 @@ pub fn FastSwapPanel() -> Element {
                 
                 // Update UI
                 active_transfers.set(transfers.clone());
+                
+                // Get pending transfers (incoming)
+                let pending = crate::fastswap::get_pending_transfers().await;
+                pending_transfers.set(pending);
                 
                 // Check if current session is complete
                 if let Some(session_id) = current_session() {
@@ -373,22 +378,99 @@ pub fn FastSwapPanel() -> Element {
                 }
             }
 
-            // Server Info
-            div {
-                style: "margin-top: 24px; padding: 16px; background: rgba(0, 0, 0, 0.3); border-radius: 12px; border-left: 4px solid #a855f7;",
-                h4 {
-                    style: "margin: 0 0 8px 0; color: #a855f7; font-size: 14px;",
-                    "ℹ️ Server Information"
-                }
+            // Incoming Transfers (Receiver UI)
+            if !pending_transfers().is_empty() {
                 div {
-                    style: "font-size: 13px; color: #888; line-height: 1.8;",
-                    "• Server running on port 53317"
-                    br {}
-                    "• Compatible with LocalSend v2.0 protocol"
-                    br {}
-                    "• Supports cross-platform file sharing"
-                    br {}
-                    "• Other devices can send files to this device"
+                    style: "margin-top: 24px; padding-top: 24px; border-top: 2px solid rgba(168, 85, 247, 0.3);",
+                    h3 {
+                        style: "margin: 0 0 12px 0; color: #e9d5ff; font-size: 18px;",
+                        "📥 Incoming Transfers"
+                    }
+                    
+                    div {
+                        style: "display: grid; gap: 12px;",
+                        for transfer in pending_transfers().iter() {
+                            div {
+                                key: "{transfer.session_id}",
+                                style: "padding: 20px; background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(124, 58, 237, 0.2)); border: 2px solid #a855f7; border-radius: 12px; box-shadow: 0 4px 12px rgba(168, 85, 247, 0.3);",
+                                
+                                // Header
+                                div {
+                                    style: "margin-bottom: 16px;",
+                                    div {
+                                        style: "font-size: 18px; font-weight: bold; color: #e9d5ff; margin-bottom: 8px;",
+                                        "📨 {transfer.sender_name} wants to send you files"
+                                    }
+                                    div {
+                                        style: "font-size: 14px; color: #888;",
+                                        "From: {transfer.sender_device}"
+                                    }
+                                }
+                                
+                                // File details
+                                div {
+                                    style: "margin-bottom: 16px; padding: 12px; background: rgba(0, 0, 0, 0.3); border-radius: 8px;",
+                                    div {
+                                        style: "font-size: 14px; color: #e9d5ff; margin-bottom: 8px;",
+                                        "📦 {transfer.file_count} file(s) • {format_bytes(transfer.total_size)}"
+                                    }
+                                    div {
+                                        style: "font-size: 12px; color: #888; max-height: 100px; overflow-y: auto;",
+                                        for (i, file) in transfer.files.iter().enumerate().take(5) {
+                                            div {
+                                                key: "{i}",
+                                                style: "padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1);",
+                                                "📄 {file}"
+                                            }
+                                        }
+                                        if transfer.files.len() > 5 {
+                                            div {
+                                                style: "padding: 4px 0; font-style: italic;",
+                                                "... and {transfer.files.len() - 5} more"
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // Action buttons
+                                div {
+                                    style: "display: flex; gap: 12px;",
+                                    button {
+                                        style: "flex: 1; padding: 12px; background: rgba(34, 197, 94, 0.2); border: 2px solid #22c55e; border-radius: 8px; color: #22c55e; cursor: pointer; font-size: 14px; font-weight: bold; transition: all 0.3s;",
+                                        onclick: {
+                                            let session_id = transfer.session_id.clone();
+                                            let sender = transfer.sender_name.clone();
+                                            move |_| {
+                                                let session_id_clone = session_id.clone();
+                                                let sender_clone = sender.clone();
+                                                spawn(async move {
+                                                    crate::fastswap::approve_transfer(&session_id_clone).await;
+                                                    status_message.set(format!("✅ Accepted transfer from {}", sender_clone));
+                                                });
+                                            }
+                                        },
+                                        "✅ Accept"
+                                    }
+                                    button {
+                                        style: "flex: 1; padding: 12px; background: rgba(239, 68, 68, 0.2); border: 2px solid #ef4444; border-radius: 8px; color: #ef4444; cursor: pointer; font-size: 14px; font-weight: bold; transition: all 0.3s;",
+                                        onclick: {
+                                            let session_id = transfer.session_id.clone();
+                                            let sender = transfer.sender_name.clone();
+                                            move |_| {
+                                                let session_id_clone = session_id.clone();
+                                                let sender_clone = sender.clone();
+                                                spawn(async move {
+                                                    crate::fastswap::deny_transfer(&session_id_clone).await;
+                                                    status_message.set(format!("❌ Denied transfer from {}", sender_clone));
+                                                });
+                                            }
+                                        },
+                                        "❌ Deny"
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
