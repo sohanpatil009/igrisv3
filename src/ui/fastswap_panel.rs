@@ -276,30 +276,98 @@ async fn send_files_to_device(
         .await;
     
     if let Some(files) = files {
+        if files.is_empty() {
+            status_message.set("No files selected".to_string());
+            return;
+        }
+        
         status_message.set(format!("Preparing to send {} file(s) to {}", files.len(), device.alias));
         
-        // Create progress entries for each file
+        // Save files to temporary paths and collect file paths
+        let mut file_paths = Vec::new();
         let mut progress_list = Vec::new();
+        
         for (i, file) in files.iter().enumerate() {
             let file_name = file.file_name();
-            let file_size = file.read().await.len() as u64;
+            let file_data = file.read().await;
+            let file_size = file_data.len() as u64;
             
-            let progress = FileProgress::new(
+            // Create temp file
+            let temp_dir = std::env::temp_dir();
+            let temp_path = temp_dir.join(&file_name);
+            
+            // Write file data to temp location
+            if let Err(e) = tokio::fs::write(&temp_path, &file_data).await {
+                status_message.set(format!("Failed to prepare file {}: {}", file_name, e));
+                return;
+            }
+            
+            file_paths.push(temp_path);
+            
+            let mut progress = FileProgress::new(
                 format!("file_{}", i),
                 file_name,
                 file_size,
             );
+            progress.status = ProgressStatus::Pending;
             progress_list.push(progress);
         }
         
-        active_transfers.set(progress_list);
+        active_transfers.set(progress_list.clone());
         
-        // TODO: Implement actual file sending using FastSwap client
-        // For now, just simulate progress
+        // Get local device info
+        let local_ip = local_ip_address::local_ip()
+            .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 100)))
+            .to_string();
+        
+        let local_device = crate::fastswap::Device::new_local(
+            format!("IGRIS-{}", whoami::username()),
+            53317,
+            local_ip
+        );
+        
+        // Create progress tracker
+        let progress_tracker = crate::fastswap::models::progress::create_progress_tracker();
+        
+        // Create transfer client
+        let client = crate::fastswap::network::TransferClient::new(progress_tracker.clone());
+        
         status_message.set(format!("Sending files to {}...", device.alias));
         
-        // Note: Full implementation would use:
-        // crate::fastswap::network::send_files(&device, files).await
+        // Send files
+        match client.send_files(&device, file_paths.clone(), &local_device).await {
+            Ok(session_id) => {
+                status_message.set(format!("Successfully sent {} file(s) to {}", files.len(), device.alias));
+                
+                // Update progress to completed
+                let mut updated_progress = active_transfers();
+                for progress in &mut updated_progress {
+                    progress.status = ProgressStatus::Completed;
+                    progress.bytes_sent = progress.total_bytes;
+                }
+                active_transfers.set(updated_progress);
+                
+                tracing::info!("Transfer completed: {}", session_id);
+            }
+            Err(e) => {
+                let error_msg = format!("Failed to send files: {}", e);
+                status_message.set(error_msg.clone());
+                
+                // Update progress to failed
+                let mut updated_progress = active_transfers();
+                for progress in &mut updated_progress {
+                    progress.status = ProgressStatus::Failed(e.to_string());
+                }
+                active_transfers.set(updated_progress);
+                
+                tracing::error!("Transfer failed: {}", e);
+            }
+        }
+        
+        // Clean up temp files
+        for path in file_paths {
+            let _ = tokio::fs::remove_file(path).await;
+        }
     }
 }
 
