@@ -11,7 +11,7 @@ use tokio::sync::{mpsc, RwLock};
 // Import from library
 use igrisv3::{
     config, ui, core, nlu, commands, plugins, utils, platform, platform_utils,
-    setup_manager, media, localshare,
+    setup_manager, media, fastswap,
     SearchState, SearchResultData, SEARCH_STATE,
 };
 
@@ -28,14 +28,14 @@ use core::stt::{init_whisper_context, transcribe_audio};
 use core::tts::TTS_ENGINE;
 use core::wake_word::listen_for_wake_word;
 use config::CONFIG;
-use ui::{SettingsPanel, MenuButton, SearchResultsPanel, SearchResultItem, CameraPanel, PresentationPanel, LocalSharePanel};
+use ui::{SettingsPanel, MenuButton, SearchResultsPanel, SearchResultItem, CameraPanel, PresentationPanel, FastSwapPanel};
 
 // Global state for voice assistant
 static ASSISTANT_STATE: once_cell::sync::Lazy<Arc<Mutex<AssistantState>>> =
     once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(AssistantState::default())));
 
-// Global LocalShare manager to keep it alive
-static LOCALSHARE_MANAGER: once_cell::sync::Lazy<Arc<Mutex<Option<localshare::LocalShareManager>>>> =
+// Global FastSwap manager to keep it alive
+static FASTSWAP_MANAGER: once_cell::sync::Lazy<Arc<Mutex<Option<fastswap::FastSwapManager>>>> =
     once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(None)));
 
 // Global UI state for voice-triggered panels
@@ -44,7 +44,7 @@ static UI_PANEL_STATE: once_cell::sync::Lazy<Arc<Mutex<UiPanelState>>> =
 
 #[derive(Default)]
 struct UiPanelState {
-    show_localshare: bool,
+    show_fastswap: bool,
 }
 
 // Camera panel state - use directly from commands module
@@ -291,28 +291,28 @@ async fn start_voice_assistant() {
     // Initialize app monitoring (now handled by plugin system)
     add_log("Application plugin system initialized", LogLevel::Info);
 
-    // Initialize LocalShare file sharing server
-    add_log("Starting LocalShare file sharing server...", LogLevel::Info);
+    // Initialize FastSwap file sharing server
+    add_log("Starting FastSwap file sharing server...", LogLevel::Info);
     let local_ip = local_ip_address::local_ip()
         .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 100)))
         .to_string();
-    let local_device = localshare::Device::new_local(
+    let local_device = fastswap::Device::new_local(
         format!("IGRIS-{}", whoami::username()),
         53317,
         local_ip.clone()
     );
     
-    let mut localshare_manager = localshare::LocalShareManager::new(53317);
-    match localshare_manager.start(local_device).await {
+    let mut fastswap_manager = fastswap::FastSwapManager::new(53317);
+    match fastswap_manager.start(local_device).await {
         Ok(_) => {
-            add_log(&format!("LocalShare server started on {} (port 53317)", local_ip), LogLevel::Success);
+            add_log(&format!("FastSwap server started on {} (port 53317)", local_ip), LogLevel::Success);
             // Store the manager to keep it alive
-            if let Ok(mut manager_guard) = LOCALSHARE_MANAGER.lock() {
-                *manager_guard = Some(localshare_manager);
+            if let Ok(mut manager_guard) = FASTSWAP_MANAGER.lock() {
+                *manager_guard = Some(fastswap_manager);
             }
         }
         Err(e) => {
-            add_log(&format!("LocalShare server failed to start: {}", e), LogLevel::Warning);
+            add_log(&format!("FastSwap server failed to start: {}", e), LogLevel::Warning);
             add_log("File sharing will not be available", LogLevel::Warning);
         }
     }
@@ -553,22 +553,22 @@ async fn process_voice_command(
         return Ok(false);
     }
     
-    // Check for LocalShare / file sharing commands
-    if cmd_lower.contains("localshare") 
-        || cmd_lower.contains("local share")
+    // Check for FastSwap / file sharing commands
+    if cmd_lower.contains("fastswap") 
+        || cmd_lower.contains("fast swap")
         || cmd_lower.contains("share files")
         || cmd_lower.contains("file sharing")
         || cmd_lower.contains("open share")
         || cmd_lower.contains("file share") {
-        add_log("LocalShare command detected", LogLevel::Info);
-        let _ = core::tts::speak("Opening LocalShare file sharing interface");
+        add_log("FastSwap command detected", LogLevel::Info);
+        let _ = core::tts::speak("Opening FastSwap file sharing interface");
         
-        // Set the global UI state to show LocalShare
+        // Set the global UI state to show FastSwap
         if let Ok(mut ui_state) = UI_PANEL_STATE.lock() {
-            ui_state.show_localshare = true;
+            ui_state.show_fastswap = true;
         }
         
-        add_log("LocalShare interface opened", LogLevel::Success);
+        add_log("FastSwap interface opened", LogLevel::Success);
         return Ok(false);
     }
     
@@ -1091,7 +1091,7 @@ fn App() -> Element {
     let mut setup_in_progress = use_signal(|| true);
     let mut show_setup_gui = use_signal(|| true);
     let show_settings = use_signal(|| false);
-    let mut show_localshare = use_signal(|| false);
+    let mut show_fastswap = use_signal(|| false);
     let mut status_text = use_signal(|| "Running First-Time Setup...".to_string());
     let mut last_command_text = use_signal(|| "Waiting for voice input...".to_string());
     let mut assistant_name = use_signal(|| CONFIG.assistant_name());
@@ -1114,7 +1114,7 @@ fn App() -> Element {
     // Camera panel state
     let mut show_camera_panel = use_signal(|| false);
     
-    // Note: File sharing is handled by LocalShare (integrated Rust implementation)
+    // Note: File sharing is handled by FastSwap (integrated Rust implementation)
 
     use_effect(move || {
         spawn(async move {
@@ -1173,11 +1173,11 @@ fn App() -> Element {
                     show_camera_panel.set(is_open);
                 }
                 
-                // Update LocalShare panel state from global (voice commands)
+                // Update FastSwap panel state from global (voice commands)
                 if let Ok(mut ui_state) = UI_PANEL_STATE.lock() {
-                    if ui_state.show_localshare && !show_localshare() {
-                        show_localshare.set(true);
-                        ui_state.show_localshare = false; // Reset after triggering
+                    if ui_state.show_fastswap && !show_fastswap() {
+                        show_fastswap.set(true);
+                        ui_state.show_fastswap = false; // Reset after triggering
                     }
                 }
             }
@@ -1246,17 +1246,17 @@ fn App() -> Element {
         // Settings Panel (modal)
         SettingsPanel { is_open: show_settings }
 
-        // LocalShare Panel (modal)
-        if show_localshare() {
+        // FastSwap Panel (modal)
+        if show_fastswap() {
             div {
                 style: "position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 100; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px);",
-                onclick: move |_| show_localshare.set(false),
+                onclick: move |_| show_fastswap.set(false),
                 
                 div {
                     style: "position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 800px; max-height: 90vh; overflow: auto; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.5);",
                     onclick: move |e| e.stop_propagation(),
                     
-                    LocalSharePanel {}
+                    FastSwapPanel {}
                 }
             }
         }
@@ -1313,7 +1313,7 @@ fn App() -> Element {
                 // Menu Button (top right)
                 MenuButton { 
                     settings_open: show_settings,
-                    localshare_open: show_localshare
+                    fastswap_open: show_fastswap
                 }
 
                 // Central Animated Panel

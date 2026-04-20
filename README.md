@@ -27,7 +27,7 @@ A powerful, fully offline voice-activated AI assistant built with Rust and Dioxu
 - **Interactive Diagrams** - Visual flowcharts for Voice and NLU systems
 - **Voice Command** - Say "Tell me about yourself" to start
 
-### 📁 LocalShare File Transfer
+### ⚡ FastSwap File Transfer
 - **Cross-Platform Sharing** - Compatible with LocalSend v2.0 protocol
 - **Network Discovery** - Automatic device scanning on local network
 - **Real-Time Progress** - Live transfer progress with speed and ETA
@@ -54,7 +54,7 @@ A powerful, fully offline voice-activated AI assistant built with Rust and Dioxu
 - Windows 10+, macOS 10.13+, or Linux
 - 4GB RAM (8GB recommended)
 - 500MB disk space for models
-- Network access for LocalShare file transfers (port 53317)
+- Network access for FastSwap file transfers (port 53317)
 
 ### Installation
 
@@ -126,9 +126,10 @@ First launch automatically downloads:
 ```
 *Photos/videos saved to Pictures/Videos folder with preview UI*
 
-### LocalShare
+### FastSwap
 ```
-"Open LocalShare"
+"Open FastSwap"
+"Fast swap"
 "Share files"
 ```
 *Click menu button to access file sharing panel*
@@ -179,9 +180,9 @@ src/
 ├── ui/                  # Dioxus components
 │   ├── settings.rs      # Settings panel
 │   ├── camera_panel.rs  # Camera UI
-│   ├── localshare_panel.rs # File sharing UI
+│   ├── fastswap_panel.rs # File sharing UI
 │   └── presentation/    # Self-presentation UI
-├── localshare/          # File transfer module
+├── fastswap/          # File transfer module
 │   ├── models/          # Device, transfer, progress models
 │   └── network/         # Discovery, server, client
 └── setup_manager/       # First-run setup
@@ -249,7 +250,7 @@ cargo test
 | Camera error | Ensure no other app using camera, FFmpeg will auto-detect devices |
 | Volume/Brightness not working | Windows: May need nircmd.exe in PATH or admin privileges |
 | Alarm not triggering | Check system time, background thread runs every 10 seconds |
-| LocalShare not finding devices | Ensure devices on same network, check firewall allows port 53317 |
+| FastSwap not finding devices | Ensure devices on same network, check firewall allows port 53317 |
 | File transfer fails | Check network stability, recipient may have rejected transfer |
 
 ## 📝 License
@@ -273,7 +274,7 @@ MIT License - see LICENSE file.
 - [x] Fully plugin-based architecture
 - [x] Dynamic camera/mic detection
 - [x] Smart command validation & fallback
-- [x] LocalShare file transfer with real-time progress
+- [x] FastSwap file transfer with real-time progress
 - [ ] Voice-activated file sharing
 - [ ] File receive notifications
 - [ ] Transfer history persistence

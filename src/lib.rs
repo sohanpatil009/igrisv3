@@ -38,8 +38,8 @@ pub mod setup_manager;
 // Media capture (camera, video)
 pub mod media;
 
-// LocalShare file sharing integration
-pub mod localshare;
+// FastSwap file sharing integration
+pub mod fastswap;
 
 // Global state for search results UI (shared across modules)
 #[derive(Clone, Debug, Default)]

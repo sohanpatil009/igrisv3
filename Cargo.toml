@@ -52,7 +52,7 @@ scraper = "0.20"
 indicatif = "0.17"
 console = { version = "0.16", features = ["std"] }
 
-# LocalShare dependencies
+# FastSwap dependencies
 axum = "0.7"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["fs", "cors"] }
