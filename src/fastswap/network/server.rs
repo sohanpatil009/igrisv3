@@ -114,10 +114,39 @@ async fn confirm_upload_handler(
 ) -> Result<Json<ConfirmUploadResponse>, StatusCode> {
     tracing::info!("Confirming upload for session: {}", request.session_id);
     
-    // Check if transfer is approved by user
-    if !crate::fastswap::is_transfer_approved(&request.session_id).await {
-        tracing::warn!("Transfer not approved yet: {}", request.session_id);
-        return Err(StatusCode::FORBIDDEN);
+    // Wait for user approval (poll every 500ms for up to 60 seconds)
+    let max_wait_time = std::time::Duration::from_secs(60);
+    let poll_interval = std::time::Duration::from_millis(500);
+    let start_time = std::time::Instant::now();
+    
+    tracing::info!("Waiting for user approval...");
+    
+    loop {
+        // Check if approved
+        if crate::fastswap::is_transfer_approved(&request.session_id).await {
+            tracing::info!("✅ Transfer approved by user");
+            break;
+        }
+        
+        // Check if denied (removed from pending without approval)
+        let pending = crate::fastswap::get_pending_transfers().await;
+        let still_pending = pending.iter().any(|t| t.session_id == request.session_id);
+        
+        if !still_pending && !crate::fastswap::is_transfer_approved(&request.session_id).await {
+            tracing::warn!("❌ Transfer denied by user: {}", request.session_id);
+            return Err(StatusCode::FORBIDDEN);
+        }
+        
+        // Check timeout
+        if start_time.elapsed() > max_wait_time {
+            tracing::warn!("⏱️ Transfer approval timeout: {}", request.session_id);
+            // Clean up pending transfer
+            crate::fastswap::deny_transfer(&request.session_id).await;
+            return Err(StatusCode::REQUEST_TIMEOUT);
+        }
+        
+        // Wait before next check
+        tokio::time::sleep(poll_interval).await;
     }
     
     let mut sessions = state.sessions.write().await;

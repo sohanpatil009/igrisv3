@@ -28,7 +28,7 @@ use core::stt::{init_whisper_context, transcribe_audio};
 use core::tts::TTS_ENGINE;
 use core::wake_word::listen_for_wake_word;
 use config::CONFIG;
-use ui::{SettingsPanel, MenuButton, SearchResultsPanel, SearchResultItem, CameraPanel, PresentationPanel, FastSwapPanel};
+use ui::{SettingsPanel, MenuButton, SearchResultsPanel, SearchResultItem, CameraPanel, PresentationPanel, FastSwapPanel, IncomingTransferPopup};
 
 // Global state for voice assistant
 static ASSISTANT_STATE: once_cell::sync::Lazy<Arc<Mutex<AssistantState>>> =
@@ -1114,6 +1114,9 @@ fn App() -> Element {
     // Camera panel state
     let mut show_camera_panel = use_signal(|| false);
     
+    // Incoming transfer state (for popup)
+    let mut pending_transfers = use_signal(|| Vec::<fastswap::PendingTransfer>::new());
+    
     // Note: File sharing is handled by FastSwap (integrated Rust implementation)
 
     use_effect(move || {
@@ -1144,6 +1147,10 @@ fn App() -> Element {
                 // Update assistant name and personality from config
                 assistant_name.set(CONFIG.assistant_name());
                 is_igris.set(CONFIG.get().personality == config::Personality::Igris);
+                
+                // Update pending transfers (for incoming transfer popup)
+                let pending = fastswap::get_pending_transfers().await;
+                pending_transfers.set(pending);
                 
                 // Update search state from global
                 let search_state = SEARCH_STATE.lock().unwrap();
@@ -1284,6 +1291,9 @@ fn App() -> Element {
 
         // Presentation Panel (full screen overlay with TTS narration)
         PresentationPanel {}
+
+        // Incoming Transfer Popup (highest z-index, appears on top of everything)
+        IncomingTransferPopup { pending_transfers }
 
         div { style: "width: 100vw; height: 100vh; display: flex; flex-direction: column; background: #000; color: #fff; font-family: 'Inter', sans-serif; position: relative; overflow: hidden;",
 
