@@ -1,0 +1,24 @@
+{
+  "camera": {
+    "device_id": 0,
+    "width": 640,
+    "height": 480,
+    "fps": 30
+  },
+  "tracking": {
+    "min_detection_confidence": 0.7,
+    "min_tracking_confidence": 0.5,
+    "max_num_hands": 1
+  },
+  "mouse": {
+    "smoothing": 0.5,
+    "sensitivity": 1.0,
+    "click_threshold": 0.03,
+    "scroll_speed": 20
+  },
+  "gestures": {
+    "pinch_threshold": 0.05,
+    "swipe_threshold": 0.15,
+    "hold_duration_ms": 500
+  }
+}
