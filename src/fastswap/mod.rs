@@ -11,6 +11,10 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use anyhow::Result;
 
+// Global progress tracker for UI access
+static GLOBAL_PROGRESS_TRACKER: once_cell::sync::Lazy<ProgressTracker> =
+    once_cell::sync::Lazy::new(|| models::progress::create_progress_tracker());
+
 /// FastSwap manager for IGRIS integration
 pub struct FastSwapManager {
     discovery: Arc<RwLock<DiscoveryService>>,
@@ -58,6 +62,11 @@ impl FastSwapManager {
     pub fn get_discovery_service(&self) -> Arc<RwLock<DiscoveryService>> {
         Arc::clone(&self.discovery)
     }
+}
+
+/// Get global progress tracker for UI access
+pub fn get_progress_tracker() -> ProgressTracker {
+    Arc::clone(&GLOBAL_PROGRESS_TRACKER)
 }
 
 impl Drop for FastSwapManager {

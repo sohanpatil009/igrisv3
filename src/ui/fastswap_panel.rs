@@ -1,14 +1,17 @@
 use dioxus::prelude::*;
-use rfd::AsyncFileDialog;
-use crate::fastswap::{Device, FileProgress, ProgressStatus};
+use rfd::FileDialog;
+use crate::fastswap::{Device, FileProgress, ProgressStatus, TransferProgress};
+use std::path::PathBuf;
 
 #[component]
 pub fn FastSwapPanel() -> Element {
     let devices = use_signal(|| Vec::<Device>::new());
     let is_scanning = use_signal(|| false);
-    let active_transfers = use_signal(|| Vec::<FileProgress>::new());
-    let status_message = use_signal(|| String::from("FastSwap Ready"));
+    let mut selected_files = use_signal(|| Vec::<PathBuf>::new());
     let mut selected_device = use_signal(|| None::<Device>);
+    let mut active_transfers = use_signal(|| Vec::<TransferProgress>::new());
+    let mut status_message = use_signal(|| String::from("FastSwap Ready"));
+    let mut current_session = use_signal(|| None::<String>);
 
     // Auto-scan on mount
     use_effect(move || {
@@ -17,13 +20,45 @@ pub fn FastSwapPanel() -> Element {
         });
     });
 
-    // Periodic refresh of devices and transfers
+    // Periodic device refresh (every 5 seconds)
     use_effect(move || {
         spawn(async move {
             loop {
                 async_std::task::sleep(std::time::Duration::from_secs(5)).await;
                 if !is_scanning() {
                     scan_for_devices(devices, is_scanning, status_message).await;
+                }
+            }
+        });
+    });
+
+    // Progress update loop (every 200ms)
+    use_effect(move || {
+        spawn(async move {
+            loop {
+                async_std::task::sleep(std::time::Duration::from_millis(200)).await;
+                
+                // Get all active transfers from global progress tracker
+                let tracker = crate::fastswap::get_progress_tracker();
+                let guard = tracker.read().await;
+                let transfers: Vec<TransferProgress> = guard.values().cloned().collect();
+                drop(guard);
+                
+                // Update UI
+                active_transfers.set(transfers.clone());
+                
+                // Check if current session is complete
+                if let Some(session_id) = current_session() {
+                    if let Some(progress) = transfers.iter().find(|t| t.session_id == session_id) {
+                        if progress.is_complete() {
+                            if progress.is_cancelled {
+                                status_message.set("❌ Transfer cancelled".to_string());
+                            } else {
+                                status_message.set("✅ Transfer complete!".to_string());
+                            }
+                            current_session.set(None);
+                        }
+                    }
                 }
             }
         });
@@ -64,6 +99,71 @@ pub fn FastSwapPanel() -> Element {
                 }
             }
 
+            // File Selection Section
+            div {
+                style: "margin-bottom: 24px; padding: 16px; background: rgba(0, 0, 0, 0.3); border-radius: 12px;",
+                h3 {
+                    style: "margin: 0 0 12px 0; color: #e9d5ff; font-size: 18px;",
+                    "📁 Select Files to Send"
+                }
+                
+                div {
+                    style: "display: flex; gap: 12px; margin-bottom: 12px;",
+                    button {
+                        style: "flex: 1; padding: 12px; background: rgba(168, 85, 247, 0.2); border: 1px solid #a855f7; border-radius: 8px; color: #e9d5ff; cursor: pointer; font-size: 14px; transition: all 0.3s;",
+                        onclick: move |_| {
+                            spawn(async move {
+                                select_files(selected_files, status_message).await;
+                            });
+                        },
+                        "📄 Select Files"
+                    }
+                    button {
+                        style: "flex: 1; padding: 12px; background: rgba(168, 85, 247, 0.2); border: 1px solid #a855f7; border-radius: 8px; color: #e9d5ff; cursor: pointer; font-size: 14px; transition: all 0.3s;",
+                        onclick: move |_| {
+                            spawn(async move {
+                                select_folder(selected_files, status_message).await;
+                            });
+                        },
+                        "📁 Select Folder"
+                    }
+                }
+                
+                // Selected files list
+                if !selected_files().is_empty() {
+                    div {
+                        style: "margin-top: 12px; padding: 12px; background: rgba(0, 0, 0, 0.3); border-radius: 8px; max-height: 150px; overflow-y: auto;",
+                        div {
+                            style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;",
+                            div {
+                                style: "font-size: 14px; color: #22c55e;",
+                                "✅ {selected_files().len()} file(s) selected ({format_total_size(&selected_files())})"
+                            }
+                            button {
+                                style: "padding: 4px 12px; background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; border-radius: 6px; color: #ef4444; cursor: pointer; font-size: 12px;",
+                                onclick: move |_| {
+                                    selected_files.set(Vec::new());
+                                    status_message.set("Selection cleared".to_string());
+                                },
+                                "Clear"
+                            }
+                        }
+                        for file in selected_files().iter().take(5) {
+                            div {
+                                style: "font-size: 12px; color: #888; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1);",
+                                "{file.file_name().and_then(|n| n.to_str()).unwrap_or(\"unknown\")}"
+                            }
+                        }
+                        if selected_files().len() > 5 {
+                            div {
+                                style: "font-size: 12px; color: #888; padding: 4px 0; font-style: italic;",
+                                "... and {selected_files().len() - 5} more"
+                            }
+                        }
+                    }
+                }
+            }
+
             // Device List
             div {
                 style: "margin-bottom: 24px;",
@@ -94,17 +194,21 @@ pub fn FastSwapPanel() -> Element {
                         for device in devices().iter() {
                             div {
                                 key: "{device.id}",
-                                style: "padding: 16px; background: rgba(168, 85, 247, 0.1); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 12px; cursor: pointer; transition: all 0.3s; hover:background: rgba(168, 85, 247, 0.2);",
+                                style: "padding: 16px; background: rgba(168, 85, 247, 0.1); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 12px; cursor: pointer; transition: all 0.3s;",
                                 onclick: {
                                     let dev = device.clone();
-                                    let active_transfers = active_transfers;
-                                    let status_message = status_message;
+                                    let files = selected_files();
                                     move |_| {
-                                        selected_device.set(Some(dev.clone()));
-                                        let dev_clone = dev.clone();
-                                        spawn(async move {
-                                            send_files_to_device(dev_clone, active_transfers, status_message).await;
-                                        });
+                                        if files.is_empty() {
+                                            status_message.set("⚠️ Please select files first".to_string());
+                                        } else {
+                                            selected_device.set(Some(dev.clone()));
+                                            let dev_clone = dev.clone();
+                                            let files_clone = files.clone();
+                                            spawn(async move {
+                                                send_files_to_device(dev_clone, files_clone, status_message, current_session).await;
+                                            });
+                                        }
                                     }
                                 },
                                 
@@ -130,9 +234,11 @@ pub fn FastSwapPanel() -> Element {
                                             "{device.device_model} • {device.ip}:{device.port}"
                                         }
                                     }
-                                    div {
-                                        style: "padding: 6px 12px; background: rgba(34, 197, 94, 0.2); border: 1px solid #22c55e; border-radius: 6px; font-size: 12px; color: #22c55e;",
-                                        "Send Files"
+                                    if !selected_files().is_empty() {
+                                        div {
+                                            style: "padding: 6px 12px; background: rgba(34, 197, 94, 0.2); border: 1px solid #22c55e; border-radius: 6px; font-size: 12px; color: #22c55e;",
+                                            "Send Files"
+                                        }
                                     }
                                 }
                             }
@@ -154,56 +260,111 @@ pub fn FastSwapPanel() -> Element {
                         style: "display: grid; gap: 12px;",
                         for transfer in active_transfers().iter() {
                             div {
-                                key: "{transfer.file_id}",
+                                key: "{transfer.session_id}",
                                 style: "padding: 16px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 12px;",
                                 
+                                // Overall progress
                                 div {
-                                    style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;",
+                                    style: "margin-bottom: 12px;",
                                     div {
-                                        style: "font-size: 14px; font-weight: bold; color: #e9d5ff;",
-                                        "📄 {transfer.file_name}"
+                                        style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;",
+                                        div {
+                                            style: "font-size: 14px; font-weight: bold; color: #e9d5ff;",
+                                            "📦 {transfer.files.len()} file(s) • {transfer.overall_progress():.1}%"
+                                        }
+                                        div {
+                                            style: "font-size: 12px; color: #888;",
+                                            "{format_bytes(transfer.transferred_bytes)} / {format_bytes(transfer.total_bytes)} • {format_speed(transfer.overall_speed())}"
+                                        }
                                     }
+                                    
+                                    // Overall progress bar
                                     div {
-                                        style: format!(
-                                            "font-size: 12px; color: {};",
-                                            match transfer.status {
-                                                ProgressStatus::Completed => "#22c55e",
-                                                ProgressStatus::Failed(_) => "#ef4444",
-                                                ProgressStatus::Cancelled => "#f59e0b",
-                                                _ => "#a855f7",
+                                        style: "width: 100%; height: 8px; background: rgba(0, 0, 0, 0.5); border-radius: 4px; overflow: hidden;",
+                                        div {
+                                            style: format!(
+                                                "height: 100%; background: linear-gradient(90deg, #a855f7, #7c3aed); width: {}%; transition: width 0.3s;",
+                                                transfer.overall_progress()
+                                            ),
+                                        }
+                                    }
+                                }
+                                
+                                // Individual files
+                                div {
+                                    style: "display: grid; gap: 8px;",
+                                    for file in transfer.files.iter() {
+                                        div {
+                                            key: "{file.file_id}",
+                                            style: "padding: 8px; background: rgba(0, 0, 0, 0.3); border-radius: 6px;",
+                                            
+                                            div {
+                                                style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;",
+                                                div {
+                                                    style: "font-size: 12px; color: #e9d5ff;",
+                                                    "📄 {file.file_name}"
+                                                }
+                                                div {
+                                                    style: format!(
+                                                        "font-size: 11px; color: {};",
+                                                        match file.status {
+                                                            ProgressStatus::Completed => "#22c55e",
+                                                            ProgressStatus::Failed(_) => "#ef4444",
+                                                            ProgressStatus::Cancelled => "#f59e0b",
+                                                            _ => "#a855f7",
+                                                        }
+                                                    ),
+                                                    {
+                                                        match &file.status {
+                                                            ProgressStatus::Pending => "⏳ Pending".to_string(),
+                                                            ProgressStatus::Transferring => "🔄 Transferring".to_string(),
+                                                            ProgressStatus::Completed => "✅ Completed".to_string(),
+                                                            ProgressStatus::Failed(e) => format!("❌ Failed: {}", e),
+                                                            ProgressStatus::Cancelled => "🚫 Cancelled".to_string(),
+                                                        }
+                                                    }
+                                                }
                                             }
-                                        ),
-                                        {
-                                            match &transfer.status {
-                                                ProgressStatus::Pending => "⏳ Pending".to_string(),
-                                                ProgressStatus::Transferring => "🔄 Transferring".to_string(),
-                                                ProgressStatus::Completed => "✅ Completed".to_string(),
-                                                ProgressStatus::Failed(e) => format!("❌ Failed: {}", e),
-                                                ProgressStatus::Cancelled => "🚫 Cancelled".to_string(),
+                                            
+                                            // File progress bar
+                                            div {
+                                                style: "width: 100%; height: 4px; background: rgba(0, 0, 0, 0.5); border-radius: 2px; overflow: hidden; margin-bottom: 4px;",
+                                                div {
+                                                    style: format!(
+                                                        "height: 100%; background: linear-gradient(90deg, #a855f7, #7c3aed); width: {}%; transition: width 0.3s;",
+                                                        file.progress_percent()
+                                                    ),
+                                                }
+                                            }
+                                            
+                                            // File stats
+                                            div {
+                                                style: "display: flex; justify-content: space-between; font-size: 10px; color: #888;",
+                                                div {
+                                                    "{format_bytes(file.bytes_sent)} / {format_bytes(file.total_bytes)} ({file.progress_percent():.1}%)"
+                                                }
+                                                div {
+                                                    "{file.format_speed()} • ETA: {file.format_eta()}"
+                                                }
                                             }
                                         }
                                     }
                                 }
                                 
-                                // Progress bar
-                                div {
-                                    style: "width: 100%; height: 8px; background: rgba(0, 0, 0, 0.5); border-radius: 4px; overflow: hidden; margin-bottom: 8px;",
-                                    div {
-                                        style: format!(
-                                            "height: 100%; background: linear-gradient(90deg, #a855f7, #7c3aed); width: {}%; transition: width 0.3s;",
-                                            transfer.progress_percent()
-                                        ),
-                                    }
-                                }
-                                
-                                // Transfer stats
-                                div {
-                                    style: "display: flex; justify-content: space-between; font-size: 12px; color: #888;",
-                                    div {
-                                        "{format_bytes(transfer.bytes_sent)} / {format_bytes(transfer.total_bytes)} ({transfer.progress_percent():.1}%)"
-                                    }
-                                    div {
-                                        "{transfer.format_speed()} • ETA: {transfer.format_eta()}"
+                                // Cancel button
+                                if !transfer.is_complete() {
+                                    button {
+                                        style: "margin-top: 12px; width: 100%; padding: 8px; background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; border-radius: 6px; color: #ef4444; cursor: pointer; font-size: 12px;",
+                                        onclick: {
+                                            let session_id = transfer.session_id.clone();
+                                            move |_| {
+                                                let session_id_clone = session_id.clone();
+                                                spawn(async move {
+                                                    cancel_transfer(&session_id_clone).await;
+                                                });
+                                            }
+                                        },
+                                        "🚫 Cancel Transfer"
                                     }
                                 }
                             }
@@ -263,115 +424,169 @@ async fn scan_for_devices(
     is_scanning.set(false);
 }
 
-// Helper function to send files to a device
-async fn send_files_to_device(
-    device: Device,
-    mut active_transfers: Signal<Vec<FileProgress>>,
+// Helper function to select files
+async fn select_files(
+    mut selected_files: Signal<Vec<PathBuf>>,
     mut status_message: Signal<String>,
 ) {
-    // Open file picker
-    let files = AsyncFileDialog::new()
-        .set_title("Select files to send")
-        .pick_files()
-        .await;
-    
-    if let Some(files) = files {
-        if files.is_empty() {
-            status_message.set("No files selected".to_string());
-            return;
-        }
-        
-        status_message.set(format!("Preparing to send {} file(s) to {}", files.len(), device.alias));
-        
-        // Save files to temporary paths and collect file paths
-        let mut file_paths = Vec::new();
-        let mut progress_list = Vec::new();
-        
-        for (i, file) in files.iter().enumerate() {
-            let file_name = file.file_name();
-            let file_data = file.read().await;
-            let file_size = file_data.len() as u64;
+    match FileDialog::new().pick_files() {
+        Some(paths) => {
+            let mut all_files = Vec::new();
             
-            // Create temp file
-            let temp_dir = std::env::temp_dir();
-            let temp_path = temp_dir.join(&file_name);
+            for path in paths {
+                if path.is_file() {
+                    all_files.push(path);
+                } else if path.is_dir() {
+                    // If user selects a folder via file picker, add all files
+                    collect_files_from_dir(&path, &mut all_files);
+                }
+            }
             
-            // Write file data to temp location
-            if let Err(e) = tokio::fs::write(&temp_path, &file_data).await {
-                status_message.set(format!("Failed to prepare file {}: {}", file_name, e));
+            if all_files.is_empty() {
+                status_message.set("❌ No files found".to_string());
                 return;
             }
             
-            file_paths.push(temp_path);
-            
-            let mut progress = FileProgress::new(
-                format!("file_{}", i),
-                file_name,
-                file_size,
-            );
-            progress.status = ProgressStatus::Pending;
-            progress_list.push(progress);
+            let total_size = calculate_total_size(&all_files);
+            selected_files.set(all_files.clone());
+            status_message.set(format!(
+                "📁 Selected {} file(s) ({:.2} MB)",
+                all_files.len(),
+                total_size as f64 / 1_048_576.0
+            ));
         }
-        
-        active_transfers.set(progress_list.clone());
-        
-        // Get local device info
-        let local_ip = local_ip_address::local_ip()
-            .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 100)))
-            .to_string();
-        
-        let local_device = crate::fastswap::Device::new_local(
-            format!("IGRIS-{}", whoami::username()),
-            53317,
-            local_ip
-        );
-        
-        // Create progress tracker
-        let progress_tracker = crate::fastswap::models::progress::create_progress_tracker();
-        
-        // Create transfer client
-        let client = crate::fastswap::network::TransferClient::new(progress_tracker.clone());
-        
-        status_message.set(format!("Sending files to {}...", device.alias));
-        
-        // Send files
-        match client.send_files(&device, file_paths.clone(), &local_device).await {
-            Ok(session_id) => {
-                status_message.set(format!("Successfully sent {} file(s) to {}", files.len(), device.alias));
-                
-                // Update progress to completed
-                let mut updated_progress = active_transfers();
-                for progress in &mut updated_progress {
-                    progress.status = ProgressStatus::Completed;
-                    progress.bytes_sent = progress.total_bytes;
-                }
-                active_transfers.set(updated_progress);
-                
-                tracing::info!("Transfer completed: {}", session_id);
-            }
-            Err(e) => {
-                let error_msg = format!("Failed to send files: {}", e);
-                status_message.set(error_msg.clone());
-                
-                // Update progress to failed
-                let mut updated_progress = active_transfers();
-                for progress in &mut updated_progress {
-                    progress.status = ProgressStatus::Failed(e.to_string());
-                }
-                active_transfers.set(updated_progress);
-                
-                tracing::error!("Transfer failed: {}", e);
-            }
-        }
-        
-        // Clean up temp files
-        for path in file_paths {
-            let _ = tokio::fs::remove_file(path).await;
+        None => {
+            status_message.set("File selection cancelled".to_string());
         }
     }
+}
+
+// Helper function to select folder
+async fn select_folder(
+    mut selected_files: Signal<Vec<PathBuf>>,
+    mut status_message: Signal<String>,
+) {
+    match FileDialog::new().pick_folder() {
+        Some(folder_path) => {
+            let mut all_files = Vec::new();
+            collect_files_from_dir(&folder_path, &mut all_files);
+            
+            if all_files.is_empty() {
+                status_message.set("❌ No files found in folder".to_string());
+                return;
+            }
+            
+            let total_size = calculate_total_size(&all_files);
+            let folder_name = folder_path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("folder");
+            
+            selected_files.set(all_files.clone());
+            status_message.set(format!(
+                "📁 Selected folder '{}' with {} file(s) ({:.2} MB)",
+                folder_name,
+                all_files.len(),
+                total_size as f64 / 1_048_576.0
+            ));
+        }
+        None => {
+            status_message.set("Folder selection cancelled".to_string());
+        }
+    }
+}
+
+// Recursive function to collect files from directory
+fn collect_files_from_dir(dir: &PathBuf, files: &mut Vec<PathBuf>) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                files.push(path);
+            } else if path.is_dir() {
+                collect_files_from_dir(&path, files); // Recursive
+            }
+        }
+    }
+}
+
+// Helper function to send files to a device
+async fn send_files_to_device(
+    device: Device,
+    files: Vec<PathBuf>,
+    mut status_message: Signal<String>,
+    mut current_session: Signal<Option<String>>,
+) {
+    if files.is_empty() {
+        status_message.set("No files selected".to_string());
+        return;
+    }
+    
+    status_message.set(format!("Preparing to send {} file(s) to {}", files.len(), device.alias));
+    
+    // Get local device info
+    let local_ip = local_ip_address::local_ip()
+        .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 100)))
+        .to_string();
+    
+    let local_device = crate::fastswap::Device::new_local(
+        format!("IGRIS-{}", whoami::username()),
+        53317,
+        local_ip
+    );
+    
+    // Get global progress tracker
+    let progress_tracker = crate::fastswap::get_progress_tracker();
+    
+    // Create transfer client
+    let client = crate::fastswap::network::TransferClient::new(progress_tracker.clone());
+    
+    status_message.set(format!("Sending files to {}...", device.alias));
+    
+    // Send files
+    match client.send_files(&device, files.clone(), &local_device).await {
+        Ok(session_id) => {
+            current_session.set(Some(session_id.clone()));
+            status_message.set(format!("Transferring {} file(s) to {}...", files.len(), device.alias));
+            tracing::info!("Transfer started: {}", session_id);
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to send files: {}", e);
+            status_message.set(error_msg.clone());
+            tracing::error!("Transfer failed: {}", e);
+        }
+    }
+}
+
+// Helper function to cancel transfer
+async fn cancel_transfer(session_id: &str) {
+    let tracker = crate::fastswap::get_progress_tracker();
+    let mut guard = tracker.write().await;
+    if let Some(progress) = guard.get_mut(session_id) {
+        progress.cancel();
+        tracing::info!("Transfer cancelled: {}", session_id);
+    }
+}
+
+// Helper function to calculate total size
+fn calculate_total_size(files: &[PathBuf]) -> u64 {
+    files.iter()
+        .filter_map(|f| std::fs::metadata(f).ok())
+        .map(|m| m.len())
+        .sum()
+}
+
+// Helper function to format total size
+fn format_total_size(files: &[PathBuf]) -> String {
+    let total = calculate_total_size(files);
+    format_bytes(total)
 }
 
 // Helper function to format bytes
 fn format_bytes(bytes: u64) -> String {
     crate::fastswap::models::progress::format_bytes(bytes)
+}
+
+// Helper function to format speed
+fn format_speed(bytes_per_sec: f64) -> String {
+    crate::fastswap::models::progress::format_bytes_per_second(bytes_per_sec)
 }
