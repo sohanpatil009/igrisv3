@@ -78,15 +78,28 @@ impl GeminiClient {
             .build()
             .unwrap();
         
-        // Try to reach Google's DNS
-        match client.get("https://8.8.8.8").send().await {
-            Ok(_) => true,
-            Err(_) => {
-                // Fallback: try to reach Gemini API directly
-                match client.get("https://generativelanguage.googleapis.com").send().await {
-                    Ok(_) => true,
-                    Err(_) => false,
-                }
+        println!("[GEMINI] Checking internet connectivity...");
+        
+        // Try to reach Google first (reliable endpoint)
+        match client.get("https://www.google.com").send().await {
+            Ok(response) => {
+                println!("[GEMINI] ✅ Google reachable (status: {})", response.status());
+                return true;
+            }
+            Err(e) => {
+                println!("[GEMINI] ❌ Google unreachable: {}", e);
+            }
+        }
+        
+        // Fallback: try to reach Gemini API directly
+        match client.get("https://generativelanguage.googleapis.com").send().await {
+            Ok(response) => {
+                println!("[GEMINI] ✅ Gemini API reachable (status: {})", response.status());
+                true
+            }
+            Err(e) => {
+                println!("[GEMINI] ❌ Gemini API unreachable: {}", e);
+                false
             }
         }
     }
@@ -150,6 +163,8 @@ Keep responses concise and natural for voice output.",
             GEMINI_BASE_URL, GEMINI_API_KEY
         );
 
+        println!("[GEMINI] Making API request to: {}", &url[..80]); // Don't log full API key
+
         let response = self
             .client
             .post(&url)
@@ -157,8 +172,11 @@ Keep responses concise and natural for voice output.",
             .send()
             .await?;
 
+        println!("[GEMINI] API response status: {}", response.status());
+
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
+            println!("[GEMINI] API error response: {}", error_text);
             return Err(anyhow!("Gemini API error: {}", error_text));
         }
 
@@ -166,6 +184,7 @@ Keep responses concise and natural for voice output.",
 
         if let Some(candidate) = gemini_response.candidates.first() {
             if let Some(part) = candidate.content.parts.first() {
+                println!("[GEMINI] ✅ Successfully got response from API");
                 return Ok(part.text.clone());
             }
         }
@@ -176,16 +195,24 @@ Keep responses concise and natural for voice output.",
 
 /// Enhanced web search that uses Gemini for direct answers
 pub async fn enhanced_web_search(query: &str) -> Option<String> {
+    println!("[GEMINI] Starting enhanced web search for: '{}'", query);
+    
     // Check if online
     if !GeminiClient::is_online().await {
+        println!("[GEMINI] ❌ Offline - falling back to local search");
         return None;
     }
 
+    println!("[GEMINI] ✅ Online - using Gemini for search");
     let client = GeminiClient::new();
     match client.smart_web_search(query).await {
-        Ok(response) => Some(response),
+        Ok(response) => {
+            println!("[GEMINI] ✅ Got response: {}", &response[..std::cmp::min(100, response.len())]);
+            Some(response)
+        }
         Err(e) => {
-            eprintln!("Gemini web search error: {}", e);
+            println!("[GEMINI] ❌ Web search error: {}", e);
+            println!("[GEMINI] 💡 Tip: Check if your API key is valid. Run 'cargo run --bin test_gemini' to debug.");
             None
         }
     }
@@ -193,16 +220,23 @@ pub async fn enhanced_web_search(query: &str) -> Option<String> {
 
 /// Enhanced voice command processing
 pub async fn enhance_voice_command(command: &str) -> Option<String> {
+    println!("[GEMINI] Enhancing voice command: '{}'", command);
+    
     // Check if online
     if !GeminiClient::is_online().await {
+        println!("[GEMINI] ❌ Offline - using local processing only");
         return None;
     }
 
+    println!("[GEMINI] ✅ Online - using Gemini for command enhancement");
     let client = GeminiClient::new();
     match client.enhance_voice_command(command).await {
-        Ok(response) => Some(response),
+        Ok(response) => {
+            println!("[GEMINI] ✅ Enhanced command: {}", response);
+            Some(response)
+        }
         Err(e) => {
-            eprintln!("Gemini voice enhancement error: {}", e);
+            println!("[GEMINI] ❌ Voice enhancement error: {}", e);
             None
         }
     }
