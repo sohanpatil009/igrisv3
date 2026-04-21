@@ -132,16 +132,18 @@ async fn gemini_transcribe_audio(audio_samples: &[f32]) -> Result<String, Box<dy
 pub fn init_whisper_context() -> Result<WhisperContext, Box<dyn std::error::Error>> {
     suppress_whisper_output();
 
-    // Try quantized model first (faster), fallback to base model
+    // Try base model first (better accuracy), fallback to quantized model
     let model_paths = [
-        "pkg/models/ggml-base-q8_0.bin",  // Quantized (faster)
-        "pkg/models/ggml-base.bin",        // Original (fallback)
+        "pkg/models/ggml-base.bin",        // Original (better accuracy)
+        "pkg/models/ggml-base-q8_0.bin",  // Quantized (fallback)
     ];
     
     let model_path = model_paths.iter()
         .find(|p| Path::new(p).exists())
         .ok_or("Whisper model not found. Please run setup first.")?;
 
+    println!("[STT] Loading Whisper model: {}", model_path);
+    
     let params = WhisperContextParameters::default();
     let ctx = WhisperContext::new_with_params(model_path, params)?;
     
