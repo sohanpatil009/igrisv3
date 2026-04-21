@@ -762,7 +762,9 @@ async fn process_voice_command(
                 return Ok(false);
             }
             Err(e) => {
-                add_log(&format!("Plugin error: {}", e), LogLevel::Error);
+                add_log(&format!("Plugin execution error: {}", e), LogLevel::Error);
+                // Continue to fallback processing instead of getting stuck
+                add_log("Trying alternative command processing...", LogLevel::Info);
             }
         }
     }
@@ -1004,15 +1006,8 @@ async fn process_voice_command(
         return Ok(false);
     }
 
-    // Execute app commands through plugin system
-    if let Some(plugin_result) = crate::plugins::process_plugin_command(command_to_use) {
-        if let Ok(response) = crate::plugins::execute_plugin_command(&plugin_result) {
-            add_log(&response, LogLevel::Success);
-            let _ = core::tts::speak(&response);
-            refresh_running_apps();
-            return Ok(false);
-        }
-    }
+    // Execute app commands through plugin system (removed duplicate - already handled above)
+    // This was causing the "stuck" behavior when plugins failed
 
     if cmd_lower.contains("file") || cmd_lower.contains("folder") {
         if let Some(response) = commands::files::process_file_command_async(command_to_use).await {
@@ -1040,7 +1035,7 @@ async fn process_voice_command(
         }
     }
 
-    add_log(&format!("Unknown: {}", command), LogLevel::Warning);
+    add_log(&format!("Unknown command: '{}' - trying fallback processing", command), LogLevel::Warning);
     
     // Try Gemini for better command understanding before giving up
     if let Some(gemini_response) = core::enhance_voice_command(command_to_use).await {
