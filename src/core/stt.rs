@@ -9,7 +9,7 @@ use std::time::Duration;
 
 // Constants
 const WHISPER_SAMPLE_RATE: u32 = 16000;
-const GEMINI_API_KEY: &str = "AIzaSyAb8RN6LMMBsptZQiH_9ns_H6ns2oSOyKIFs20xPtM6Yg7rqdIg";
+const GEMINI_API_KEY: &str = "AIzaSyCzo_wq46SwVNH-kLGdX7zbGrVU-iewRQQ";
 
 #[derive(Debug, Serialize)]
 struct GeminiAudioRequest {

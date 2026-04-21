@@ -6,7 +6,7 @@ use std::time::Duration;
 use reqwest::Client;
 use anyhow::{Result, anyhow};
 
-const GEMINI_API_KEY: &str = "AIzaSyAb8RN6LMMBsptZQiH_9ns_H6ns2oSOyKIFs20xPtM6Yg7rqdIg";
+const GEMINI_API_KEY: &str = "AIzaSyCzo_wq46SwVNH-kLGdX7zbGrVU-iewRQQ";
 const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 
 #[derive(Debug, Serialize)]
@@ -69,6 +69,23 @@ impl GeminiClient {
                 .build()
                 .expect("Failed to create HTTP client"),
         }
+    }
+
+    /// List available models
+    pub async fn list_models(&self) -> Result<String> {
+        let url = format!("{}/models?key={}", GEMINI_BASE_URL, GEMINI_API_KEY);
+        
+        println!("[GEMINI] Listing available models...");
+        
+        let response = self.client.get(&url).send().await?;
+        
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(anyhow!("Failed to list models: {}", error_text));
+        }
+        
+        let response_text = response.text().await?;
+        Ok(response_text)
     }
 
     /// Check if internet connection is available
@@ -159,7 +176,7 @@ Keep responses concise and natural for voice output.",
         };
 
         let url = format!(
-            "{}/models/gemini-1.5-flash:generateContent?key={}",
+            "{}/models/gemini-2.0-flash:generateContent?key={}",
             GEMINI_BASE_URL, GEMINI_API_KEY
         );
 
