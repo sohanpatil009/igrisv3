@@ -24,7 +24,7 @@ use utils::shared_memory::init_shared_memory;
 use commands::app_utils::list_running_apps;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use core::stt::{init_whisper_context, transcribe_audio};
+use core::stt::{init_whisper_context, transcribe_audio, hybrid_transcribe_audio};
 use core::tts::TTS_ENGINE;
 use core::wake_word::listen_for_wake_word;
 use config::CONFIG;
@@ -438,7 +438,7 @@ async fn continuous_listening_mode(
             add_log(&format!("Speech detected in {}ms", time_ms), LogLevel::Info);
         }
 
-        let command = match transcribe_audio(&capture_result.samples, whisper_ctx) {
+        let command = match hybrid_transcribe_audio(&capture_result.samples, whisper_ctx).await {
             Ok(text) => text.trim().to_string(),
             Err(_) => continue,
         };
@@ -1041,6 +1041,39 @@ async fn process_voice_command(
     }
 
     add_log(&format!("Unknown: {}", command), LogLevel::Warning);
+    
+    // Try Gemini for better command understanding before giving up
+    if let Some(gemini_response) = core::enhance_voice_command(command_to_use).await {
+        add_log("Gemini enhanced command understanding", LogLevel::Info);
+        
+        if gemini_response.starts_with("ACTION:") {
+            // Gemini understood it as a system command
+            let action_part = gemini_response.strip_prefix("ACTION:").unwrap_or("").trim();
+            add_log(&format!("Gemini suggested action: {}", action_part), LogLevel::Info);
+            let _ = core::tts::speak("Let me try that for you.");
+            
+            // Try to execute the suggested action
+            if let Some(plugin_result) = crate::plugins::process_plugin_command(action_part) {
+                if let Ok(response) = crate::plugins::execute_plugin_command(&plugin_result) {
+                    add_log(&response, LogLevel::Success);
+                    let _ = core::tts::speak(&response);
+                    return Ok(false);
+                }
+            }
+        } else if gemini_response.starts_with("ANSWER:") {
+            // Gemini provided a direct answer
+            let answer = gemini_response.strip_prefix("ANSWER:").unwrap_or("").trim();
+            add_log(&format!("Gemini answer: {}", answer), LogLevel::Success);
+            let _ = core::tts::speak(answer);
+            return Ok(false);
+        } else if gemini_response.starts_with("CLARIFY:") {
+            // Gemini needs clarification
+            let clarification = gemini_response.strip_prefix("CLARIFY:").unwrap_or("").trim();
+            add_log(&format!("Gemini clarification: {}", clarification), LogLevel::Info);
+            let _ = core::tts::speak(clarification);
+            return Ok(false);
+        }
+    }
     
     // Quick validation - check if command makes sense
     let words: Vec<&str> = cmd_lower.split_whitespace().collect();
