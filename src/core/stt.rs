@@ -347,7 +347,24 @@ pub fn transcribe_audio(
 }
 
 #[cfg(target_os = "windows")]
-fn suppress_whisper_output() { }
+fn suppress_whisper_output() {
+    // On Windows, redirect stderr to null to suppress Whisper debug output
+    use std::ptr;
+    unsafe {
+        let null_handle = winapi::um::fileapi::CreateFileA(
+            b"NUL\0".as_ptr() as *const i8,
+            winapi::um::winnt::GENERIC_WRITE,
+            winapi::um::winnt::FILE_SHARE_READ | winapi::um::winnt::FILE_SHARE_WRITE,
+            ptr::null_mut(),
+            winapi::um::fileapi::OPEN_EXISTING,
+            0,
+            ptr::null_mut(),
+        );
+        if null_handle != winapi::um::handleapi::INVALID_HANDLE_VALUE {
+            winapi::um::processenv::SetStdHandle(winapi::um::winbase::STD_ERROR_HANDLE, null_handle);
+        }
+    }
+}
 
 #[cfg(not(target_os = "windows"))]
 fn suppress_whisper_output() {
