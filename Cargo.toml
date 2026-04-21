@@ -104,7 +104,7 @@ icon = "icons/icon.ico"
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = ["processthreadsapi", "winnt", "winuser", "winsock2", "ws2def"] }
+winapi = { version = "0.3", features = ["processthreadsapi", "winnt", "winuser", "winsock2", "ws2def", "handleapi", "processenv", "fileapi", "winbase"] }
 windows = { version = "0.52", features = [
     "Win32_Foundation",
     "Win32_System_Com",
