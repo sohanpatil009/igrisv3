@@ -3,129 +3,17 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextPar
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use serde::{Deserialize, Serialize};
-use reqwest::Client;
 use std::time::Duration;
 
 // Constants
 const WHISPER_SAMPLE_RATE: u32 = 16000;
-const GEMINI_API_KEY: &str = "AIzaSyCzo_wq46SwVNH-kLGdX7zbGrVU-iewRQQ";
 
-#[derive(Debug, Serialize)]
-struct GeminiAudioRequest {
-    contents: Vec<AudioContent>,
-    #[serde(rename = "generationConfig")]
-    generation_config: AudioGenerationConfig,
-}
-
-#[derive(Debug, Serialize)]
-struct AudioContent {
-    parts: Vec<AudioPart>,
-}
-
-#[derive(Debug, Serialize)]
-struct AudioPart {
-    text: String,
-}
-
-#[derive(Debug, Serialize)]
-struct AudioGenerationConfig {
-    temperature: f32,
-    #[serde(rename = "maxOutputTokens")]
-    max_output_tokens: i32,
-}
-
-#[derive(Debug, Deserialize)]
-struct GeminiAudioResponse {
-    candidates: Vec<AudioCandidate>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AudioCandidate {
-    content: AudioResponseContent,
-}
-
-#[derive(Debug, Deserialize)]
-struct AudioResponseContent {
-    parts: Vec<AudioResponsePart>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AudioResponsePart {
-    text: String,
-}
-
-/// Hybrid STT: Try Gemini first (when online), fallback to Whisper
+/// Hybrid STT: uses local Whisper transcription
 pub async fn hybrid_transcribe_audio(
     audio_samples: &[f32],
     whisper_ctx: &WhisperContext,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    // Check if online and try Gemini first
-    if crate::core::GeminiClient::is_online().await {
-        match gemini_transcribe_audio(audio_samples).await {
-            Ok(transcription) => {
-                println!("[STT] ✅ Gemini transcription successful");
-                return Ok(transcription);
-            }
-            Err(e) => {
-                println!("[STT] ⚠️ Gemini failed, falling back to Whisper: {}", e);
-            }
-        }
-    } else {
-        println!("[STT] 📡 Offline - using local Whisper");
-    }
-    
-    // Fallback to local Whisper
     transcribe_audio(audio_samples, whisper_ctx)
-}
-
-/// Transcribe audio using Gemini API (when online)
-async fn gemini_transcribe_audio(audio_samples: &[f32]) -> Result<String, Box<dyn std::error::Error>> {
-    // Convert audio to base64 (simplified approach)
-    // Note: This is a placeholder - Gemini's audio API might need different format
-    let audio_text = format!("Please transcribe this audio command. The audio contains {} samples at 16kHz.", audio_samples.len());
-    
-    let request = GeminiAudioRequest {
-        contents: vec![AudioContent {
-            parts: vec![AudioPart {
-                text: format!("Convert this speech to text. Respond with only the transcribed text, no explanations: {}", audio_text),
-            }],
-        }],
-        generation_config: AudioGenerationConfig {
-            temperature: 0.1, // Low temperature for accuracy
-            max_output_tokens: 100,
-        },
-    };
-
-    let client = Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()?;
-
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={}",
-        GEMINI_API_KEY
-    );
-
-    let response = client
-        .post(&url)
-        .json(&request)
-        .send()
-        .await?;
-
-    if !response.status().is_success() {
-        let error_text = response.text().await.unwrap_or_default();
-        return Err(format!("Gemini STT API error: {}", error_text).into());
-    }
-
-    let gemini_response: GeminiAudioResponse = response.json().await?;
-
-    if let Some(candidate) = gemini_response.candidates.first() {
-        if let Some(part) = candidate.content.parts.first() {
-            return Ok(part.text.trim().to_string());
-        }
-    }
-
-    Err("No transcription from Gemini".into())
 }
 
 /// Initialize Whisper context once at startup

@@ -56,7 +56,7 @@ impl VadConfig {
             zcr_threshold: 0.2, // Lower threshold - catch more speech
             speech_start_frames: 2, // Quick detection
             speech_end_frames: 15, // ~300ms silence - wait longer for full word
-            min_speech_ms: 400, // "arise" takes ~400-600ms to say
+            min_speech_ms: 400, // "hello" takes ~300-500ms to say
             max_speech_ms: 2000, // 2 seconds max for wake word
             pre_speech_buffer_ms: 300, // Capture more of the beginning
             post_speech_buffer_ms: 200, // Capture the end

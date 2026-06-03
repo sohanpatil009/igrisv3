@@ -102,9 +102,9 @@ mod tests {
     
     #[test]
     fn test_wake_word_detection() {
-        // Default wake word is "arise" for IGRIS personality
-        assert!(contains_wake_word("arise"));
-        assert!(contains_wake_word("ARISE"));
+        // Default wake word is "hey" for IGRIS personality
+        assert!(contains_wake_word("hello"));
+        assert!(contains_wake_word("HELLO"));
         assert!(!contains_wake_word("hello"));
     }
     

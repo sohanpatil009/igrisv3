@@ -355,8 +355,8 @@ async fn start_voice_assistant() {
             continue;
         }
         
-        update_status("Sleeping - Say 'arise' to wake me");
-        add_log("Listening for wake word 'arise'...", LogLevel::Info);
+update_status("Sleeping - Say 'hello' to wake me");
+add_log("Listening for wake word 'hello'...", LogLevel::Info);
 
         match listen_for_wake_word(&whisper_ctx) {
             Ok(_) => {
@@ -467,7 +467,7 @@ async fn continuous_listening_mode(
         if cmd_lower.contains("sleep") 
             || cmd_lower.contains("standby")
             || cmd_lower.contains("hibernate") {
-            let _ = core::tts::speak("Okay, going to sleep. Say arise to wake me.");
+            let _ = core::tts::speak("Okay, going to sleep. Say hello to wake me.");
             add_log("Entering sleep mode", LogLevel::Info);
             let mut state = ASSISTANT_STATE.lock().unwrap();
             state.is_listening = false;
@@ -812,7 +812,7 @@ async fn process_voice_command(
                     if cmd_lower.contains("sleep") 
                         || cmd_lower.contains("standby")
                         || cmd_lower.contains("hibernate") {
-                        let _ = core::tts::speak("Okay, going to sleep. Say arise to wake me.");
+                        let _ = core::tts::speak("Okay, going to sleep. Say hello to wake me.");
                         add_log("Entering sleep mode", LogLevel::Info);
                         nlu::context::add_to_context(
                             command.to_string(),
@@ -955,7 +955,7 @@ async fn process_voice_command(
     if cmd_lower.contains("sleep") 
         || cmd_lower.contains("standby")
         || cmd_lower.contains("hibernate") {
-        let _ = core::tts::speak("Okay, going to sleep. Say arise to wake me.");
+        let _ = core::tts::speak("Okay, going to sleep. Say hello to wake me.");
         add_log("Entering sleep mode", LogLevel::Info);
         return Ok(false);
     }
@@ -1036,39 +1036,6 @@ async fn process_voice_command(
     }
 
     add_log(&format!("Unknown command: '{}' - trying fallback processing", command), LogLevel::Warning);
-    
-    // Try Gemini for better command understanding before giving up
-    if let Some(gemini_response) = core::enhance_voice_command(command_to_use).await {
-        add_log("Gemini enhanced command understanding", LogLevel::Info);
-        
-        if gemini_response.starts_with("ACTION:") {
-            // Gemini understood it as a system command
-            let action_part = gemini_response.strip_prefix("ACTION:").unwrap_or("").trim();
-            add_log(&format!("Gemini suggested action: {}", action_part), LogLevel::Info);
-            let _ = core::tts::speak("Let me try that for you.");
-            
-            // Try to execute the suggested action
-            if let Some(plugin_result) = crate::plugins::process_plugin_command(action_part) {
-                if let Ok(response) = crate::plugins::execute_plugin_command(&plugin_result) {
-                    add_log(&response, LogLevel::Success);
-                    let _ = core::tts::speak(&response);
-                    return Ok(false);
-                }
-            }
-        } else if gemini_response.starts_with("ANSWER:") {
-            // Gemini provided a direct answer
-            let answer = gemini_response.strip_prefix("ANSWER:").unwrap_or("").trim();
-            add_log(&format!("Gemini answer: {}", answer), LogLevel::Success);
-            let _ = core::tts::speak(answer);
-            return Ok(false);
-        } else if gemini_response.starts_with("CLARIFY:") {
-            // Gemini needs clarification
-            let clarification = gemini_response.strip_prefix("CLARIFY:").unwrap_or("").trim();
-            add_log(&format!("Gemini clarification: {}", clarification), LogLevel::Info);
-            let _ = core::tts::speak(clarification);
-            return Ok(false);
-        }
-    }
     
     // Quick validation - check if command makes sense
     let words: Vec<&str> = cmd_lower.split_whitespace().collect();

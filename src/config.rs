@@ -70,25 +70,25 @@ impl Personality {
     
     pub fn wake_word(&self) -> &str {
         match self {
-            Personality::Igris => "arise",
+            Personality::Igris => "hello",
             Personality::Alita => "alita",
-            Personality::Custom(_) => "arise",
+            Personality::Custom(_) => "hello",
         }
     }
     
     /// Get all wake word variations for this personality
     pub fn wake_word_variations(&self) -> Vec<&str> {
         match self {
-            Personality::Igris => vec!["arise", "hey igris", "hi igris", "igris"],
-            Personality::Alita => vec!["alita", "hey alita", "hi alita", "arise"],
-            Personality::Custom(_) => vec!["arise"],
+            Personality::Igris => vec!["hello", "hello igris", "hi igris", "igris"],
+            Personality::Alita => vec!["alita", "hello alita", "hi alita", "hello"],
+            Personality::Custom(_) => vec!["hello"],
         }
     }
     
     pub fn greeting(&self) -> &str {
         match self {
-            Personality::Igris => "IGRIS at your service master. Say arise when you need me.",
-            Personality::Alita => "Hey! Alita here. Just say arise  when you need me!",
+            Personality::Igris => "IGRIS at your service master. Say hello when you need me.",
+            Personality::Alita => "Hey! Alita here. Just say hello when you need me!",
             Personality::Custom(name) => name,
         }
     }

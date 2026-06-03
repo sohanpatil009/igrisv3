@@ -88,9 +88,6 @@ path = "src/lib.rs"
 name = "igrisv3"
 path = "src/main.rs"
 
-[[bin]]
-name = "test_gemini"
-path = "src/bin/test_gemini.rs"
 
 # Asset embedding
 [package.metadata.dioxus]

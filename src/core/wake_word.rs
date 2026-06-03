@@ -7,7 +7,7 @@ use whisper_rs::WhisperContext;
 pub fn listen_for_wake_word(
     whisper_ctx: &WhisperContext,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let wake_word = "arise";
+    let wake_word = "hello";
     
     loop {
         let capture_config = CaptureConfig {
@@ -33,15 +33,11 @@ pub fn listen_for_wake_word(
 
         let transcription_lower = transcription.to_lowercase();
         
-        // Debug: Show what was detected (uncomment for debugging)
-        // println!("🎤 Detected: \"{}\"", transcription_lower);
-
         if contains_wake_word(&transcription_lower, wake_word) {
             println!("✅ Wake word detected: \"{}\"", transcription);
             return Ok(());
         }
 
-        // Only show this message occasionally to reduce spam
         if transcription_lower.len() > 2 {
             println!("❌ Wake word not detected. Heard: \"{}\"", transcription_lower);
         }
@@ -56,13 +52,10 @@ fn contains_wake_word(transcription: &str, wake_word: &str) -> bool {
     }
 
     let variations = vec![
-        "arise", "a rise", "arize", "a rize", "arrays", "a raise", 
-        "ariese", "araise", "erize", "erise", "arice", "araiz",
-        "aris", "arris", "aarise", "a rice", "arais",
-        "arise!", "arise.", "arises", "arising", "arisen",
-        "a ryze", "a ryes", "arrize", "arrise", "a ris", "a riss",
-        "rice", "rise", "eyes", "iris", "aries", "rays", "raise",
-        "hey arise", "ok arise", "computer arise", "assistant arise",
+        "hello", "hallo", "hullo", "halo", "helo",
+        "hello!", "hello.", "helloo", "hellooo", "hellow",
+        "hllo", "helo", "ello", "hlo",
+        "ok hello", "hello there", "computer hello", "assistant hello",
     ];
 
     for variant in variations {
@@ -71,8 +64,7 @@ fn contains_wake_word(transcription: &str, wake_word: &str) -> bool {
         }
     }
     
-    // More lenient distance check
-    levenshtein_distance(&transcription_clean, wake_word) <= 3
+    levenshtein_distance(&transcription_clean, wake_word) <= 2
 }
 
 fn levenshtein_distance(s1: &str, s2: &str) -> usize {

@@ -247,15 +247,6 @@ pub fn process_search_command(command: &str) -> Option<String> {
         || cmd_lower.contains("how");
     
     if should_read_results {
-        // Try Gemini first for direct answers (async call in sync context)
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        if let Some(gemini_answer) = rt.block_on(crate::core::enhanced_web_search(&query)) {
-            // Also open browser for visual reference if user wants
-            let _ = search_in_browser(&query, engine);
-            return Some(format!("🤖 {}", gemini_answer));
-        }
-        
-        // Fallback to web scraping if Gemini fails
         if let Some(answer) = search_and_read_results(&query) {
             let _ = search_in_browser(&query, engine);
             return Some(answer);
