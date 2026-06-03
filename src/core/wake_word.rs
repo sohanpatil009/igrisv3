@@ -1,6 +1,7 @@
 // Wake word detection - minimal output
 use crate::core::audio_capture::{capture_audio_vad, CaptureConfig, CaptureMode};
 use crate::core::stt::transcribe_audio;
+use std::sync::atomic::Ordering;
 use whisper_rs::WhisperContext;
 
 /// Listen for wake word with minimal output
@@ -10,6 +11,11 @@ pub fn listen_for_wake_word(
     let wake_word = "hello";
     
     loop {
+        // Check for reset signal from hotkey
+        if crate::RESET_FLAG.swap(false, Ordering::Relaxed) {
+            return Err("Reset by hotkey".into());
+        }
+        
         let capture_config = CaptureConfig {
             mode: CaptureMode::WakeWord,
             max_wait_ms: 10000,

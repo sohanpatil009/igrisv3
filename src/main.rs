@@ -12,7 +12,7 @@ use tokio::sync::{mpsc, RwLock};
 use igrisv3::{
     config, ui, core, nlu, commands, plugins, utils, platform, platform_utils,
     setup_manager, media, fastswap,
-    SearchState, SearchResultData, SEARCH_STATE,
+    SearchState, SearchResultData, SEARCH_STATE, RESET_FLAG,
 };
 
 use dioxus::desktop::{Config, WindowBuilder};
@@ -22,6 +22,7 @@ use setup_manager::gui::{is_setup_complete, SetupGui};
 use setup_manager::{SetupManager, SetupUI};
 use utils::shared_memory::init_shared_memory;
 use commands::app_utils::list_running_apps;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use core::stt::{init_whisper_context, transcribe_audio, hybrid_transcribe_audio};
@@ -49,6 +50,8 @@ struct UiPanelState {
 
 // Camera panel state - use directly from commands module
 use commands::ffmpeg_camera::{CameraPanelState, CAMERA_PANEL_STATE};
+
+
 
 
 #[derive(Clone, Debug)]
@@ -82,16 +85,17 @@ impl Default for AssistantState {
 }
 
 fn main() {
-    // Register global hotkey (Ctrl+Shift+Space)
+    // Register global hotkey (Ctrl+Shift+Space) - resets voice loop
     if let Err(e) = utils::hotkey::register_global_hotkey(|| {
-        println!("[HOTKEY] Ctrl+Shift+Space pressed - Activating IGRIS");
+        println!("[HOTKEY] Ctrl+Shift+Space pressed - Resetting IGRIS");
+        
+        // Signal all loops to reset back to wake word detection
+        RESET_FLAG.store(true, Ordering::Relaxed);
         
         // Speak the invoke greeting
         if let Err(e) = utils::greetings::speak_invoke_greeting() {
             eprintln!("[HOTKEY] Failed to speak greeting: {}", e);
         }
-        
-        // Note: After greeting, the main loop should listen for wake word "Arise"
     }) {
         eprintln!("[HOTKEY] Failed to register global hotkey: {}", e);
         eprintln!("[HOTKEY] You can still use the application window");
@@ -349,6 +353,16 @@ async fn start_voice_assistant() {
 
     // Main wake word loop
     loop {
+        // Check for reset signal from hotkey
+        if RESET_FLAG.swap(false, Ordering::Relaxed) {
+            add_log("Reset signal received - restarting from wake word", LogLevel::Info);
+            {
+                let mut state = ASSISTANT_STATE.lock().unwrap();
+                state.is_awake = false;
+                state.is_listening = false;
+            }
+        }
+        
         // Skip wake word listening while presentation is active
         if ui::is_presentation_active() {
             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -360,6 +374,12 @@ add_log("Listening for wake word 'hello'...", LogLevel::Info);
 
         match listen_for_wake_word(&whisper_ctx) {
             Ok(_) => {
+                // Check for reset signal right after wake word
+                if RESET_FLAG.swap(false, Ordering::Relaxed) {
+                    add_log("Reset during wake - going back to sleep", LogLevel::Info);
+                    continue;
+                }
+                
                 {
                     let mut state = ASSISTANT_STATE.lock().unwrap();
                     state.is_awake = true;
@@ -414,6 +434,15 @@ async fn continuous_listening_mode(
     }
 
     loop {
+        // Check for reset signal from hotkey - bail out to wake word loop
+        if RESET_FLAG.swap(false, Ordering::Relaxed) {
+            add_log("Reset signal received in command mode", LogLevel::Info);
+            let _ = core::tts::speak("Going back to sleep.");
+            let mut state = ASSISTANT_STATE.lock().unwrap();
+            state.is_listening = false;
+            return Ok(false);
+        }
+        
         // Skip voice listening while presentation is active
         if ui::is_presentation_active() {
             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -481,6 +510,11 @@ async fn process_voice_command(
     command: &str,
     whisper_ctx: &whisper_rs::WhisperContext,
 ) -> Result<bool, Box<dyn std::error::Error>> {
+    // Check for reset signal from hotkey
+    if RESET_FLAG.swap(false, Ordering::Relaxed) {
+        return Ok(false);
+    }
+    
     // Quick check for exit commands (fastest path)
     // But exclude "exit camera", "close camera" etc - those should go to plugin system
     let cmd_lower = command.to_lowercase();

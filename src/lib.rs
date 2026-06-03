@@ -5,6 +5,7 @@
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 // Configuration system
@@ -61,6 +62,9 @@ pub struct SearchResultData {
 
 pub static SEARCH_STATE: once_cell::sync::Lazy<Arc<Mutex<SearchState>>> =
     once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(SearchState::default())));
+
+// Reset flag - set by global hotkey to restart voice loop from wake word detection
+pub static RESET_FLAG: AtomicBool = AtomicBool::new(false);
 
 // Re-export camera panel state from commands module
 pub use commands::ffmpeg_camera::{CameraPanelState, CAMERA_PANEL_STATE};
