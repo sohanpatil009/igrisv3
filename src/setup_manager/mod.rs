@@ -125,6 +125,8 @@ pub fn verify_installation() -> Result<bool, Box<dyn std::error::Error>> {
         pkg_dir.join("models/bold_voice/en_US-libritts_r-medium.onnx.json"),
     ];
 
+    // The reasoning LLM model is optional — downloaded separately if user wants smart fallback.
+
     let all_exist = required_paths.iter().all(|p| p.exists());
 
     if all_exist {

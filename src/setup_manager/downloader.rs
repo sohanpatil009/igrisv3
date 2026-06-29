@@ -180,6 +180,13 @@ impl FileDownloader {
             },
         ];
 
+        // Local reasoning LLM (Qwen 2.5 1.5B GGUF) — optional, enables smart fallback
+        files.push(DownloadFile {
+            name: "Reasoning LLM",
+            url: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf".to_string(),
+            filename: "qwen2.5-1.5b-instruct-q4_k_m.gguf".to_string(),
+        });
+
         // Only add LLVM if not installed (skip on macOS - use brew instead)
         #[cfg(not(target_os = "macos"))]
         if !llvm_installed {

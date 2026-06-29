@@ -28,6 +28,7 @@ use std::thread;
 use core::stt::{init_whisper_context, transcribe_audio, hybrid_transcribe_audio};
 use core::tts::TTS_ENGINE;
 use core::wake_word::listen_for_wake_word;
+use core::local_llm::{is_local_llm_ready, global_reason, default_tool_system_prompt, parse_tool_call};
 use config::CONFIG;
 use ui::{SettingsPanel, MenuButton, SearchResultsPanel, SearchResultItem, CameraPanel, PresentationPanel, FastSwapPanel, IncomingTransferPopup};
 
@@ -310,6 +311,17 @@ async fn start_voice_assistant() {
         *manager_guard = Some(fastswap_manager);
     }
     add_log("FastSwap ready (starts on demand)", LogLevel::Info);
+
+    // Initialize local reasoning LLM (optional — model may not be downloaded yet)
+    let llm_model_path = "pkg/models/qwen2.5-1.5b-instruct-q4_k_m.gguf";
+    if std::path::Path::new(llm_model_path).exists() {
+        match core::local_llm::init_local_llm(llm_model_path) {
+            Ok(_) => add_log("Local reasoning LLM loaded", LogLevel::Success),
+            Err(e) => add_log(&format!("Local LLM init error: {}", e), LogLevel::Warning),
+        }
+    } else {
+        add_log("Local LLM model not found — download via setup to enable smart reasoning", LogLevel::Info);
+    }
 
     let whisper_ctx = match init_whisper_context() {
         Ok(ctx) => {
@@ -942,6 +954,31 @@ async fn process_voice_command(
                     return Ok(false);
                 }
                 _ => {}
+            }
+        }
+    }
+
+    // LLM reasoning fallback — when NLU couldn't understand, try the local model
+    if is_local_llm_ready() {
+        add_log("[LocalLLM] Trying local reasoning model...", LogLevel::Info);
+        if let Some(output) = global_reason(&default_tool_system_prompt(), command_to_use) {
+            add_log(
+                &format!("[LocalLLM] Raw output: {}", &output[..output.len().min(120)]),
+                LogLevel::Info,
+            );
+            if let Some((tool, args)) = parse_tool_call(&output) {
+                add_log(
+                    &format!("[LocalLLM] Tool: {} | args: {}", tool, args),
+                    LogLevel::Info,
+                );
+                let response = route_llm_tool(tool, args, command_to_use).await;
+                nlu::context::add_to_context(
+                    command.to_string(),
+                    response.clone(),
+                    format!("llm_{}", tool),
+                    vec![],
+                );
+                return Ok(false);
             }
         }
     }
@@ -1595,6 +1632,157 @@ fn add_log(message: &str, level: LogLevel) {
     if state.logs.len() > 100 {
         state.logs.remove(0);
     }
+}
+
+/// Route an LLM-discovered tool call to the appropriate command handler.
+async fn route_llm_tool(tool: &str, _args: &str, command_to_use: &str) -> String {
+    match tool {
+        "open_app" => {
+            if let Some(plugin_result) = crate::plugins::process_plugin_command(command_to_use) {
+                match crate::plugins::execute_plugin_command(&plugin_result) {
+                    Ok(msg) => {
+                        add_log(&msg, LogLevel::Success);
+                        let _ = core::tts::speak(&msg);
+                        refresh_running_apps();
+                        msg
+                    }
+                    Err(e) => format!("Failed: {}", e),
+                }
+            } else {
+                let response = "I couldn't find that application.";
+                let _ = core::tts::speak(response);
+                response.to_string()
+            }
+        }
+        "close_app" => {
+            if let Some(plugin_result) = crate::plugins::process_plugin_command(command_to_use) {
+                match crate::plugins::execute_plugin_command(&plugin_result) {
+                    Ok(msg) => {
+                        add_log(&msg, LogLevel::Success);
+                        let _ = core::tts::speak(&msg);
+                        refresh_running_apps();
+                        msg
+                    }
+                    Err(e) => format!("Failed: {}", e),
+                }
+            } else {
+                let response = "I couldn't close that application.";
+                let _ = core::tts::speak(response);
+                response.to_string()
+            }
+        }
+        "close_all_apps" => {
+            let response = commands::app_utils::close_all_apps().unwrap_or_default();
+            add_log(&response, LogLevel::Success);
+            let _ = core::tts::speak(&response);
+            refresh_running_apps();
+            response
+        }
+        "search_web" => {
+            let response = commands::web::search_and_read_results(command_to_use)
+                .unwrap_or_else(|| "Search failed.".to_string());
+            add_log(&response, LogLevel::Success);
+            let _ = core::tts::speak(&response);
+            response
+        }
+        "open_website" => {
+            let response = "Opening website...";
+            let _ = core::tts::speak(response);
+            if let Some(plugin_result) = crate::plugins::process_plugin_command(command_to_use) {
+                let _ = crate::plugins::execute_plugin_command(&plugin_result);
+            }
+            response.to_string()
+        }
+        "system_command" => {
+            if let Some(response) = commands::system::process_system_command(command_to_use) {
+                add_log(&response, LogLevel::Success);
+                let _ = core::tts::speak(&response);
+                response
+            } else {
+                let response = "System command failed.";
+                let _ = core::tts::speak(response);
+                response.to_string()
+            }
+        }
+        "camera_action" => {
+            let _ = core::tts::speak("Processing camera command...");
+            // Try plugin system first, then fallback to direct command
+            if let Some(plugin_result) = crate::plugins::process_plugin_command(command_to_use) {
+                match crate::plugins::execute_plugin_command(&plugin_result) {
+                    Ok(msg) => {
+                        add_log(&msg, LogLevel::Success);
+                        return msg;
+                    }
+                    Err(_) => {}
+                }
+            }
+            let response = "Camera command processed.";
+            response.to_string()
+        }
+        "file_operation" => {
+            let _ = core::tts::speak("Processing file command...");
+            if let Some(response) = commands::files::process_file_command_async(command_to_use).await {
+                add_log(&response, LogLevel::Success);
+                response
+            } else {
+                let response = "I couldn't complete that file operation.";
+                let _ = core::tts::speak(response);
+                response.to_string()
+            }
+        }
+        "set_alarm" => {
+            let response = commands::reminders::handle_alarm_command("alarm_set", command_to_use)
+                .unwrap_or_else(|e| format!("Alarm error: {}", e));
+            add_log(&response, LogLevel::Success);
+            let _ = core::tts::speak(&response);
+            response
+        }
+        "set_reminder" => {
+            let response = commands::reminders::handle_reminder_command("reminder_set", command_to_use)
+                .unwrap_or_else(|e| format!("Reminder error: {}", e));
+            add_log(&response, LogLevel::Success);
+            let _ = core::tts::speak(&response);
+            response
+        }
+        "get_weather" => {
+            let response = commands::web::search_and_read_results("weather today")
+                .unwrap_or_else(|| "Weather lookup failed.".to_string());
+            add_log(&response, LogLevel::Success);
+            let _ = core::tts::speak(&response);
+            response
+        }
+        "tell_fact" => {
+            let response = commands::web::search_and_read_results("tell me an interesting fact")
+                .unwrap_or_else(|| "Search failed.".to_string());
+            add_log(&response, LogLevel::Success);
+            let _ = core::tts::speak(&response);
+            response
+        }
+        "tell_joke" => {
+            let response = commands::web::search_and_read_results("tell me a joke")
+                .unwrap_or_else(|| "Search failed.".to_string());
+            add_log(&response, LogLevel::Success);
+            let _ = core::tts::speak(&response);
+            response
+        }
+        "general_chat" | _ => {
+            let response = if tool == "general_chat" {
+                extract_chat_response(_args).unwrap_or_else(|| "I'm not sure how to respond to that.".to_string())
+            } else {
+                "I don't know how to do that yet.".to_string()
+            };
+            add_log(&response, LogLevel::Success);
+            let _ = core::tts::speak(&response);
+            response
+        }
+    }
+}
+
+/// Quick helper to pull the "response" field from a JSON args blob.
+fn extract_chat_response(args: &str) -> Option<String> {
+    let re = regex::Regex::new(r#""response"\s*:\s*"([^"]+)""#).ok()?;
+    let caps = re.captures(args)?;
+    caps.get(1).map(|m| m.as_str().to_string())
 }
 
 fn refresh_running_apps() {

@@ -38,6 +38,9 @@ regex = "1.10"
 urlencoding = "2.1"
 fuzzy-matcher = "0.3"
 
+# Local LLM for smart reasoning fallback
+llama-cpp-2 = "0.1"
+
 # FFT for noise cancellation
 rustfft = "6.1"
 num-complex = "0.4"
