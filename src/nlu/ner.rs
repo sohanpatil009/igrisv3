@@ -88,7 +88,7 @@ impl NerEngine {
             ],
         );
         
-        // Percentage patterns
+        // Percentage patterns — full match span prevents overlap with Number
         self.add_pattern(
             EntityType::Percentage,
             vec![
@@ -97,13 +97,13 @@ impl NerEngine {
             ],
         );
         
-        // Duration patterns
+        // Duration patterns — capture group 1 includes both number and unit
         self.add_pattern(
             EntityType::Duration,
             vec![
-                r"\b(\d+)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)\b",
-                r"\bin\s+(\d+)\s*(seconds?|minutes?|hours?)\b",
-                r"\bafter\s+(\d+)\s*(seconds?|minutes?|hours?)\b",
+                r"\b(\d+\s*(?:seconds?|secs?|minutes?|mins?|hours?|hrs?))\b",
+                r"\bin\s+(\d+\s*(?:seconds?|minutes?|hours?))\b",
+                r"\bafter\s+(\d+\s*(?:seconds?|minutes?|hours?))\b",
             ],
         );
         
@@ -229,24 +229,20 @@ impl NerEngine {
         // Extract application names first (highest priority)
         entities.extend(self.extract_applications(&text_lower));
         
-        // Extract other entity types
+        // Extract non-Number entity types (more specific types take priority)
         for (entity_type, patterns) in &self.patterns {
+            if *entity_type == EntityType::Number {
+                continue;
+            }
             for pattern in patterns {
-                if let Some(captures) = pattern.captures(&text_lower) {
-                    if let Some(matched) = captures.get(1) {
-                        let entity = Entity::new(
-                            entity_type.clone(),
-                            matched.as_str().to_string(),
-                            matched.start(),
-                            matched.end(),
-                        );
-                        
-                        // Avoid duplicates
-                        if !self.overlaps_with_existing(&entity, &entities) {
-                            entities.push(entity);
-                        }
-                    }
-                }
+                self.match_and_add(pattern, &text_lower, entity_type, &mut entities);
+            }
+        }
+        
+        // Extract Number entities last (generic, only where nothing more specific matched)
+        if let Some(patterns) = self.patterns.get(&EntityType::Number) {
+            for pattern in patterns {
+                self.match_and_add(pattern, &text_lower, &EntityType::Number, &mut entities);
             }
         }
         
@@ -254,6 +250,29 @@ impl NerEngine {
         entities.sort_by_key(|e| e.start_pos);
         
         entities
+    }
+    
+    fn match_and_add(
+        &self,
+        pattern: &Regex,
+        text: &str,
+        entity_type: &EntityType,
+        entities: &mut Vec<Entity>,
+    ) {
+        if let Some(captures) = pattern.captures(text) {
+            if let Some(matched) = captures.get(1) {
+                let full_match = captures.get(0).unwrap();
+                let entity = Entity::new(
+                    entity_type.clone(),
+                    matched.as_str().to_string(),
+                    full_match.start(),
+                    full_match.end(),
+                );
+                if !self.overlaps_with_existing(&entity, entities) {
+                    entities.push(entity);
+                }
+            }
+        }
     }
     
     /// Extract application names from text
@@ -274,12 +293,15 @@ impl NerEngine {
         entities
     }
     
-    /// Check if entity overlaps with existing entities
+    /// Check if entity overlaps with existing entities.
+    /// Only blocks same-type overlaps (prevents duplicate Number or duplicate Application).
+    /// Different entity types at the same span are both valuable (e.g. "20" is both a Number and a Percentage).
     fn overlaps_with_existing(&self, entity: &Entity, existing: &[Entity]) -> bool {
         existing.iter().any(|e| {
-            (entity.start_pos >= e.start_pos && entity.start_pos < e.end_pos)
-                || (entity.end_pos > e.start_pos && entity.end_pos <= e.end_pos)
-                || (entity.start_pos <= e.start_pos && entity.end_pos >= e.end_pos)
+            e.entity_type == entity.entity_type
+                && ((entity.start_pos >= e.start_pos && entity.start_pos < e.end_pos)
+                    || (entity.end_pos > e.start_pos && entity.end_pos <= e.end_pos)
+                    || (entity.start_pos <= e.start_pos && entity.end_pos >= e.end_pos))
         })
     }
     

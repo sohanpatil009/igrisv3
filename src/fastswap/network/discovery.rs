@@ -72,27 +72,39 @@ impl DiscoveryService {
 
     async fn probe_device(ip: &str, port: u16) -> Option<Device> {
         let url = format!("http://{}:{}/api/localsend/v2/info", ip, port);
-        
-        match reqwest::Client::builder()
+
+        let client = match reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(2))
             .build()
         {
-            Ok(client) => {
-                match client.get(&url).send().await {
-                    Ok(response) => {
-                        if response.status().is_success() {
-                            if let Ok(device) = response.json::<Device>().await {
-                                tracing::info!("Found device: {} at {}", device.alias, ip);
-                                return Some(device);
-                            }
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!("Failed to build reqwest client for probe: {}", e);
+                return None;
+            }
+        };
+
+        match client.get(&url).send().await {
+            Ok(response) => {
+                if response.status().is_success() {
+                    match response.json::<Device>().await {
+                        Ok(device) => {
+                            tracing::info!("Found device: {} at {}", device.alias, ip);
+                            return Some(device);
+                        }
+                        Err(e) => {
+                            tracing::debug!("Device at {} returned invalid JSON: {}", ip, e);
                         }
                     }
-                    Err(_) => {}
+                } else {
+                    tracing::debug!("Device at {} returned status {}", ip, response.status());
                 }
             }
-            Err(_) => {}
+            Err(e) => {
+                tracing::debug!("No response from {}: {}", ip, e);
+            }
         }
-        
+
         None
     }
 

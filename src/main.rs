@@ -35,9 +35,7 @@ use ui::{SettingsPanel, MenuButton, SearchResultsPanel, SearchResultItem, Camera
 static ASSISTANT_STATE: once_cell::sync::Lazy<Arc<Mutex<AssistantState>>> =
     once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(AssistantState::default())));
 
-// Global FastSwap manager to keep it alive
-static FASTSWAP_MANAGER: once_cell::sync::Lazy<Arc<Mutex<Option<fastswap::FastSwapManager>>>> =
-    once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(None)));
+
 
 // Global UI state for voice-triggered panels
 static UI_PANEL_STATE: once_cell::sync::Lazy<Arc<Mutex<UiPanelState>>> =
@@ -295,31 +293,23 @@ async fn start_voice_assistant() {
     // Initialize app monitoring (now handled by plugin system)
     add_log("Application plugin system initialized", LogLevel::Info);
 
-    // Initialize FastSwap file sharing server
-    add_log("Starting FastSwap file sharing server...", LogLevel::Info);
+    // Initialize FastSwap (stored but not started — starts on demand via UI or voice cmd)
     let local_ip = local_ip_address::local_ip()
         .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 100)))
         .to_string();
     let local_device = fastswap::Device::new_local(
         format!("IGRIS-{}", whoami::username()),
         53317,
-        local_ip.clone()
+        local_ip.clone(),
     );
-    
-    let mut fastswap_manager = fastswap::FastSwapManager::new(53317);
-    match fastswap_manager.start(local_device).await {
-        Ok(_) => {
-            add_log(&format!("FastSwap server started on {} (port 53317)", local_ip), LogLevel::Success);
-            // Store the manager to keep it alive
-            if let Ok(mut manager_guard) = FASTSWAP_MANAGER.lock() {
-                *manager_guard = Some(fastswap_manager);
-            }
-        }
-        Err(e) => {
-            add_log(&format!("FastSwap server failed to start: {}", e), LogLevel::Warning);
-            add_log("File sharing will not be available", LogLevel::Warning);
-        }
+    if let Ok(mut dev_guard) = fastswap::FASTSWAP_DEVICE.lock() {
+        *dev_guard = Some(local_device);
     }
+    let fastswap_manager = fastswap::FastSwapManager::new(53317);
+    if let Ok(mut manager_guard) = fastswap::FASTSWAP_MANAGER.lock() {
+        *manager_guard = Some(fastswap_manager);
+    }
+    add_log("FastSwap ready (starts on demand)", LogLevel::Info);
 
     let whisper_ctx = match init_whisper_context() {
         Ok(ctx) => {
@@ -1232,7 +1222,9 @@ fn App() -> Element {
                 if let Ok(mut ui_state) = UI_PANEL_STATE.lock() {
                     if ui_state.show_fastswap && !show_fastswap() {
                         show_fastswap.set(true);
-                        ui_state.show_fastswap = false; // Reset after triggering
+                        ui_state.show_fastswap = false;
+                        // Start server on first show
+                        spawn(async { fastswap::start_on_demand().await });
                     }
                 }
             }

@@ -2,7 +2,7 @@
 // Optimized audio capture with VAD integration for low-latency recording
 // Eliminates fixed recording durations by detecting speech boundaries in real-time
 
-use crate::core::vad::{Vad, VadConfig, VadEvent};
+use crate::core::vad::{VoiceActivityDetector, VadConfig, VadEvent};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -110,7 +110,7 @@ struct CaptureState {
     /// Number of channels
     channels: usize,
     /// VAD instance (if using VAD mode)
-    vad: Option<Vad>,
+    vad: Option<VoiceActivityDetector>,
     /// Frame buffer for VAD processing
     frame_buffer: Vec<f32>,
     /// Whether capture is complete
@@ -129,7 +129,7 @@ impl CaptureState {
             raw_buffer: Vec::with_capacity(device_sample_rate as usize * 15), // 15 sec capacity
             device_sample_rate,
             channels,
-            vad: vad_config.map(Vad::new),
+            vad: vad_config.map(VoiceActivityDetector::new),
             frame_buffer: Vec::with_capacity(512),
             complete: false,
             speech_detected: false,
@@ -170,7 +170,7 @@ impl CaptureState {
                 resample_chunk(&mono_samples, self.device_sample_rate, WHISPER_SAMPLE_RATE);
 
             for sample in resampled {
-                if let Some(event) = vad.process_sample(sample, &mut self.frame_buffer) {
+                if let Some((_, Some(event))) = vad.process_sample(sample, &mut self.frame_buffer) {
                     match event {
                         VadEvent::SpeechStarted => {
                             self.speech_detected = true;
@@ -180,7 +180,6 @@ impl CaptureState {
                             self.complete = true;
                             return;
                         }
-                        _ => {}
                     }
                 }
             }
@@ -191,7 +190,7 @@ impl CaptureState {
     fn get_resampled_audio(&self) -> Vec<f32> {
         if let Some(ref vad) = self.vad {
             // Use VAD's trimmed audio
-            vad.get_speech_audio()
+            vad.get_audio().to_vec()
         } else {
             // Resample entire buffer
             resample_linear(

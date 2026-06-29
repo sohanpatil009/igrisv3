@@ -1,8 +1,11 @@
 use crate::fastswap::models::*;
-use anyhow::Result;
+use anyhow::{Context, Result};
+use futures::future::join_all;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
+use tokio::sync::watch;
 use uuid::Uuid;
 
 pub struct TransferClient {
@@ -11,14 +14,14 @@ pub struct TransferClient {
 }
 
 impl TransferClient {
-    pub fn new(progress_tracker: ProgressTracker) -> Self {
-        Self {
+    pub fn new(progress_tracker: ProgressTracker) -> Result<Self> {
+        Ok(Self {
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(300))
                 .build()
-                .unwrap(),
+                .context("Failed to build reqwest client")?,
             progress_tracker,
-        }
+        })
     }
 
     pub async fn send_files(
@@ -31,17 +34,17 @@ impl TransferClient {
 
         let local_session_id = Uuid::new_v4().to_string();
 
-        // Prepare file info
         let mut file_infos = Vec::new();
         let mut file_progresses = Vec::new();
-        
+
         for path in &files {
             let metadata = tokio::fs::metadata(path).await?;
-            let file_name = path.file_name()
+            let file_name = path
+                .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("unknown")
                 .to_string();
-            
+
             let file_id = Uuid::new_v4().to_string();
 
             file_infos.push(FileInfo {
@@ -54,18 +57,15 @@ impl TransferClient {
                 preview: None,
             });
 
-            file_progresses.push(FileProgress::new(
-                file_id,
-                file_name,
-                metadata.len(),
-            ));
+            file_progresses.push(FileProgress::new(file_id, file_name, metadata.len()));
         }
 
-        // Initialize progress tracking with local session ID
         let transfer_progress = TransferProgress::new(local_session_id.clone(), file_progresses);
-        self.progress_tracker.write().await.insert(local_session_id.clone(), transfer_progress);
+        self.progress_tracker
+            .write()
+            .await
+            .insert(local_session_id.clone(), transfer_progress);
 
-        // Prepare upload request
         let prepare_request = PrepareUploadRequest {
             info: DeviceInfo {
                 alias: local_device.alias.clone(),
@@ -77,27 +77,23 @@ impl TransferClient {
             files: file_infos.clone(),
         };
 
-        let url = format!("http://{}:{}/api/localsend/v2/prepare-upload", target.ip, target.port);
-        
+        let url = format!(
+            "http://{}:{}/api/localsend/v2/prepare-upload",
+            target.ip, target.port
+        );
+
         tracing::info!("Preparing upload to {}", url);
-        let response = self.client
-            .post(&url)
-            .json(&prepare_request)
-            .send()
-            .await?;
+        let response = self.client.post(&url).json(&prepare_request).send().await?;
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            
-            // Mark as failed
             let mut tracker = self.progress_tracker.write().await;
             if let Some(progress) = tracker.get_mut(&local_session_id) {
                 for file in &mut progress.files {
                     file.status = ProgressStatus::Failed(format!("Prepare failed: {}", status));
                 }
             }
-            
             anyhow::bail!("Failed to prepare upload: {} - {}", status, body);
         }
 
@@ -105,189 +101,116 @@ impl TransferClient {
         let server_session_id = prepare_response.session_id.clone();
         tracing::info!("Upload prepared, server session: {}", server_session_id);
 
-        // Step 3: Send confirmation (ACK) - Complete the three-way handshake
-        let confirm_url = format!("http://{}:{}/api/localsend/v2/confirm-upload", target.ip, target.port);
+        let confirm_url = format!(
+            "http://{}:{}/api/localsend/v2/confirm-upload",
+            target.ip, target.port
+        );
         let confirm_request = ConfirmUploadRequest {
             session_id: server_session_id.clone(),
         };
-        
+
         tracing::info!("Sending confirmation handshake...");
-        let confirm_response = self.client
+        let confirm_response = self
+            .client
             .post(&confirm_url)
             .json(&confirm_request)
             .send()
             .await?;
-        
+
         if !confirm_response.status().is_success() {
             let status = confirm_response.status();
             let body = confirm_response.text().await.unwrap_or_default();
-            
             let mut tracker = self.progress_tracker.write().await;
             if let Some(progress) = tracker.get_mut(&local_session_id) {
                 for file in &mut progress.files {
                     file.status = ProgressStatus::Failed(format!("Handshake failed: {}", status));
                 }
             }
-            
             anyhow::bail!("Failed to confirm upload: {} - {}", status, body);
         }
-        
+
         let _confirm_resp: ConfirmUploadResponse = confirm_response.json().await?;
-        tracing::info!("✅ Three-way handshake complete, starting transfer");
+        tracing::info!("Three-way handshake complete, starting transfer");
 
-        // Upload each file
+        // Cancellation channel — UI calls cancel_transfer which toggles this
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        crate::fastswap::register_cancellation(&local_session_id, cancel_tx).await;
+
+        // Concurrent uploads with cancellation
+        let mut handles = Vec::new();
         for (file_path, file_info) in files.iter().zip(file_infos.iter()) {
-            // Check if cancelled
-            {
-                let tracker = self.progress_tracker.read().await;
-                if let Some(progress) = tracker.get(&local_session_id) {
-                    if progress.is_cancelled {
-                        tracing::info!("Transfer cancelled by user");
-                        return Ok(local_session_id);
-                    }
-                }
-            }
-
-            let file_response = prepare_response.files.iter()
+            let file_response = prepare_response
+                .files
+                .iter()
                 .find(|f| f.id == file_info.id)
                 .ok_or_else(|| anyhow::anyhow!("File response not found"))?;
 
-            match self.upload_file(
-                target,
-                file_path,
-                &server_session_id,  // Use server's session ID for upload
-                &file_info.id,
-                &file_response.token,
-                file_info.size,
-                &file_info.file_type,
-                &local_session_id,  // Pass local session ID for progress tracking
-            ).await {
-                Ok(_) => {
-                    let mut tracker = self.progress_tracker.write().await;
-                    if let Some(progress) = tracker.get_mut(&local_session_id) {
-                        progress.mark_file_completed(&file_info.id);
+            let mut cancel_rx: watch::Receiver<bool> = cancel_rx.clone();
+            let client = self.client.clone();
+            let tracker = self.progress_tracker.clone();
+            let local_sid = local_session_id.clone();
+            let server_sid = server_session_id.clone();
+            let target_device = target.clone();
+            let path = file_path.clone();
+            let fid = file_info.id.clone();
+            let ftoken = file_response.token.clone();
+            let fsize = file_info.size;
+            let ftype = file_info.file_type.clone();
+
+            handles.push(tokio::spawn(async move {
+                // Check cancellation via watch
+                if *cancel_rx.borrow_and_update() {
+                    let mut guard = tracker.write().await;
+                    if let Some(progress) = guard.get_mut(&local_sid) {
+                        progress.mark_file_failed(&fid, "Cancelled".into());
                     }
+                    return;
                 }
-                Err(e) => {
-                    let mut tracker = self.progress_tracker.write().await;
-                    if let Some(progress) = tracker.get_mut(&local_session_id) {
-                        progress.mark_file_failed(&file_info.id, e.to_string());
-                    }
-                    return Err(e);
+
+                upload_file(
+                    &client,
+                    &tracker,
+                    &target_device,
+                    &path,
+                    &server_sid,
+                    &fid,
+                    &ftoken,
+                    fsize,
+                    &ftype,
+                    &local_sid,
+                )
+                .await;
+
+                let mut guard = tracker.write().await;
+                if let Some(progress) = guard.get_mut(&local_sid) {
+                    progress.mark_file_completed(&fid);
                 }
-            }
+            }));
         }
 
-        tracing::info!("All files sent successfully");
-        Ok(local_session_id)
-    }
+        let results = join_all(handles).await;
 
-    async fn upload_file(
-        &self,
-        target: &Device,
-        file_path: &PathBuf,
-        server_session_id: &str,
-        file_id: &str,
-        token: &str,
-        file_size: u64,
-        content_type: &str,
-        local_session_id: &str,
-    ) -> Result<()> {
-        tracing::info!("Uploading file: {:?} ({} bytes / {:.2} MB)", 
-            file_path, file_size, file_size as f64 / 1_048_576.0);
-
-        // Update status to transferring
-        {
-            let mut tracker = self.progress_tracker.write().await;
-            if let Some(progress) = tracker.get_mut(local_session_id) {
-                if let Some(file) = progress.files.iter_mut().find(|f| f.file_id == file_id) {
-                    file.status = ProgressStatus::Transferring;
-                }
-            }
-        }
-
-        let url = format!(
-            "http://{}:{}/api/localsend/v2/upload?sessionId={}&fileId={}&token={}",
-            target.ip, target.port, server_session_id, file_id, token
-        );
-
-        tracing::info!("Uploading to URL: {}", url);
-        tracing::info!("Server session: {}, File: {}, Token: {}", server_session_id, file_id, token);
-
-        // Open file for streaming
-        let file = File::open(file_path).await?;
-        let mut reader = tokio::io::BufReader::new(file);
-        
-        // Create progress tracking channel
-        let (tx, rx) = tokio::sync::mpsc::channel::<Result<bytes::Bytes, std::io::Error>>(100);
-        
-        // Clone values for the streaming task
-        let tracker = self.progress_tracker.clone();
-        let local_session_id = local_session_id.to_string();
-        let file_id = file_id.to_string();
-        let chunk_size = 64 * 1024; // 64KB chunks for better performance
-        
-        // Spawn task to read file and send chunks
-        tokio::spawn(async move {
-            let mut bytes_sent = 0u64;
-            let mut buffer = vec![0u8; chunk_size];
-            
-            loop {
-                match reader.read(&mut buffer).await {
-                    Ok(0) => {
-                        // EOF reached
-                        break;
-                    }
-                    Ok(n) => {
-                        bytes_sent += n as u64;
-                        
-                        // Update progress
+        // Check for errors
+        for r in &results {
+            if let Err(e) = r {
+                let mut guard = self.progress_tracker.write().await;
+                if let Some(progress) = guard.get_mut(&local_session_id) {
+                    for file in &mut progress.files {
+                        if file.status == ProgressStatus::Transferring
+                            || file.status == ProgressStatus::Pending
                         {
-                            let mut guard = tracker.write().await;
-                            if let Some(progress) = guard.get_mut(&local_session_id) {
-                                progress.update_file_progress(&file_id, bytes_sent);
-                            }
+                            file.status = ProgressStatus::Failed(format!("Transfer error: {}", e));
                         }
-                        
-                        // Send chunk
-                        let chunk = bytes::Bytes::copy_from_slice(&buffer[..n]);
-                        if tx.send(Ok(chunk)).await.is_err() {
-                            break;
-                        }
-                        
-                        // Small delay for UI updates (every 10 chunks = ~640KB)
-                        if bytes_sent % (chunk_size as u64 * 10) == 0 {
-                            tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
-                        }
-                    }
-                    Err(e) => {
-                        let _ = tx.send(Err(e)).await;
-                        break;
                     }
                 }
+                tracing::error!("Concurrent upload task failed: {}", e);
             }
-        });
-        
-        // Create streaming body
-        let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-        let body = reqwest::Body::wrap_stream(stream);
-
-        let response = self.client
-            .post(&url)
-            .header("Content-Type", content_type)
-            .header("Content-Length", file_size.to_string())
-            .body(body)
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            anyhow::bail!("Failed to upload file: {} - {}", status, body);
         }
 
-        tracing::info!("✅ File uploaded successfully: {:?}", file_path);
-        Ok(())
+        crate::fastswap::unregister_cancellation(&local_session_id).await;
+
+        tracing::info!("All files sent");
+        Ok(local_session_id)
     }
 
     pub async fn cancel_transfer(&self, session_id: &str) {
@@ -296,5 +219,124 @@ impl TransferClient {
             progress.cancel();
             tracing::info!("Transfer {} cancelled", session_id);
         }
+        crate::fastswap::notify_cancellation(session_id).await;
     }
+}
+
+async fn upload_file(
+    client: &reqwest::Client,
+    tracker: &ProgressTracker,
+    target: &Device,
+    file_path: &PathBuf,
+    server_session_id: &str,
+    file_id: &str,
+    token: &str,
+    file_size: u64,
+    content_type: &str,
+    local_session_id: &str,
+) {
+    tracing::info!(
+        "Uploading file: {:?} ({} bytes / {:.2} MB)",
+        file_path,
+        file_size,
+        file_size as f64 / 1_048_576.0
+    );
+
+    // Update status to transferring
+    {
+        let mut guard = tracker.write().await;
+        if let Some(progress) = guard.get_mut(local_session_id) {
+            if let Some(file) = progress.files.iter_mut().find(|f| f.file_id == file_id) {
+                file.status = ProgressStatus::Transferring;
+            }
+        }
+    }
+
+    let url = format!(
+        "http://{}:{}/api/localsend/v2/upload?sessionId={}&fileId={}&token={}",
+        target.ip, target.port, server_session_id, file_id, token
+    );
+
+    let file = match File::open(file_path).await {
+        Ok(f) => f,
+        Err(e) => {
+            let mut guard = tracker.write().await;
+            if let Some(progress) = guard.get_mut(local_session_id) {
+                progress.mark_file_failed(file_id, format!("Failed to open file: {}", e));
+            }
+            return;
+        }
+    };
+    let mut reader = tokio::io::BufReader::new(file);
+
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<bytes::Bytes, std::io::Error>>(100);
+
+    let tracker_clone = tracker.clone();
+    let local_sid = local_session_id.to_string();
+    let fid = file_id.to_string();
+    let chunk_size = 64 * 1024;
+
+    tokio::spawn(async move {
+        let mut bytes_sent = 0u64;
+        let mut buffer = vec![0u8; chunk_size];
+
+        loop {
+            match reader.read(&mut buffer).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    bytes_sent += n as u64;
+                    {
+                        let mut guard = tracker_clone.write().await;
+                        if let Some(progress) = guard.get_mut(&local_sid) {
+                            progress.update_file_progress(&fid, bytes_sent);
+                        }
+                    }
+                    let chunk = bytes::Bytes::copy_from_slice(&buffer[..n]);
+                    if tx.send(Ok(chunk)).await.is_err() {
+                        break;
+                    }
+                    if bytes_sent % (chunk_size as u64 * 10) == 0 {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(Err(e)).await;
+                    break;
+                }
+            }
+        }
+    });
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+    let body = reqwest::Body::wrap_stream(stream);
+
+    let response = match client
+        .post(&url)
+        .header("Content-Type", content_type)
+        .header("Content-Length", file_size.to_string())
+        .body(body)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            let mut guard = tracker.write().await;
+            if let Some(progress) = guard.get_mut(local_session_id) {
+                progress.mark_file_failed(file_id, format!("Upload request failed: {}", e));
+            }
+            return;
+        }
+    };
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        let mut guard = tracker.write().await;
+        if let Some(progress) = guard.get_mut(local_session_id) {
+            progress.mark_file_failed(file_id, format!("Upload failed: {} - {}", status, body));
+        }
+        return;
+    }
+
+    tracing::info!("File uploaded: {:?}", file_path);
 }

@@ -14,9 +14,10 @@ pub fn FastSwapPanel() -> Element {
     let mut status_message = use_signal(|| String::from("FastSwap Ready"));
     let mut current_session = use_signal(|| None::<String>);
 
-    // Auto-scan on mount
+    // Auto-scan on mount (also ensures server starts on demand)
     use_effect(move || {
         spawn(async move {
+            crate::fastswap::start_on_demand().await;
             scan_for_devices(devices, is_scanning, status_message).await;
         });
     });
@@ -524,7 +525,13 @@ async fn send_files_to_device(
     let progress_tracker = crate::fastswap::get_progress_tracker();
     
     // Create transfer client
-    let client = crate::fastswap::network::TransferClient::new(progress_tracker.clone());
+    let client = match crate::fastswap::network::TransferClient::new(progress_tracker.clone()) {
+        Ok(c) => c,
+        Err(e) => {
+            status_message.set(format!("Failed to create transfer client: {}", e));
+            return;
+        }
+    };
     
     status_message.set(format!("Sending files to {}...", device.alias));
     
