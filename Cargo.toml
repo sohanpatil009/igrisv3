@@ -38,9 +38,6 @@ regex = "1.10"
 urlencoding = "2.1"
 fuzzy-matcher = "0.3"
 
-# Local LLM for smart reasoning fallback
-llama-cpp-2 = "0.1"
-
 # FFT for noise cancellation
 rustfft = "6.1"
 num-complex = "0.4"
@@ -68,6 +65,13 @@ mime_guess = "2.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 rfd = "0.15"
+
+# Optional: Local reasoning LLM (feature-gated to avoid symbol conflicts with whisper-rs)
+llama-cpp-2 = { version = "0.1", optional = true }
+
+[features]
+default = []
+llm = ["llama-cpp-2"]
 
 [dev-dependencies]
 tempfile = "3.8"

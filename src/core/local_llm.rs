@@ -1,3 +1,4 @@
+#![cfg(feature = "llm")]
 use anyhow::{Context, Result};
 use std::num::NonZeroU32;
 use std::path::Path;

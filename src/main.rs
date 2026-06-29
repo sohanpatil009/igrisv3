@@ -28,6 +28,7 @@ use std::thread;
 use core::stt::{init_whisper_context, transcribe_audio, hybrid_transcribe_audio};
 use core::tts::TTS_ENGINE;
 use core::wake_word::listen_for_wake_word;
+#[cfg(feature = "llm")]
 use core::local_llm::{is_local_llm_ready, global_reason, default_tool_system_prompt, parse_tool_call};
 use config::CONFIG;
 use ui::{SettingsPanel, MenuButton, SearchResultsPanel, SearchResultItem, CameraPanel, PresentationPanel, FastSwapPanel, IncomingTransferPopup};
@@ -312,15 +313,17 @@ async fn start_voice_assistant() {
     }
     add_log("FastSwap ready (starts on demand)", LogLevel::Info);
 
-    // Initialize local reasoning LLM (optional — model may not be downloaded yet)
-    let llm_model_path = "pkg/models/qwen2.5-1.5b-instruct-q4_k_m.gguf";
-    if std::path::Path::new(llm_model_path).exists() {
-        match core::local_llm::init_local_llm(llm_model_path) {
-            Ok(_) => add_log("Local reasoning LLM loaded", LogLevel::Success),
-            Err(e) => add_log(&format!("Local LLM init error: {}", e), LogLevel::Warning),
+    #[cfg(feature = "llm")]
+    {
+        let llm_model_path = "pkg/models/qwen2.5-1.5b-instruct-q4_k_m.gguf";
+        if std::path::Path::new(llm_model_path).exists() {
+            match core::local_llm::init_local_llm(llm_model_path) {
+                Ok(_) => add_log("Local reasoning LLM loaded", LogLevel::Success),
+                Err(e) => add_log(&format!("Local LLM init error: {}", e), LogLevel::Warning),
+            }
+        } else {
+            add_log("Local LLM model not found — download via setup to enable smart reasoning", LogLevel::Info);
         }
-    } else {
-        add_log("Local LLM model not found — download via setup to enable smart reasoning", LogLevel::Info);
     }
 
     let whisper_ctx = match init_whisper_context() {
@@ -958,27 +961,29 @@ async fn process_voice_command(
         }
     }
 
-    // LLM reasoning fallback — when NLU couldn't understand, try the local model
-    if is_local_llm_ready() {
-        add_log("[LocalLLM] Trying local reasoning model...", LogLevel::Info);
-        if let Some(output) = global_reason(&default_tool_system_prompt(), command_to_use) {
-            add_log(
-                &format!("[LocalLLM] Raw output: {}", &output[..output.len().min(120)]),
-                LogLevel::Info,
-            );
-            if let Some((tool, args)) = parse_tool_call(&output) {
+    #[cfg(feature = "llm")]
+    {
+        if is_local_llm_ready() {
+            add_log("[LocalLLM] Trying local reasoning model...", LogLevel::Info);
+            if let Some(output) = global_reason(&default_tool_system_prompt(), command_to_use) {
                 add_log(
-                    &format!("[LocalLLM] Tool: {} | args: {}", tool, args),
+                    &format!("[LocalLLM] Raw output: {}", &output[..output.len().min(120)]),
                     LogLevel::Info,
                 );
-                let response = route_llm_tool(tool, args, command_to_use).await;
-                nlu::context::add_to_context(
-                    command.to_string(),
-                    response.clone(),
-                    format!("llm_{}", tool),
-                    vec![],
-                );
-                return Ok(false);
+                if let Some((tool, args)) = parse_tool_call(&output) {
+                    add_log(
+                        &format!("[LocalLLM] Tool: {} | args: {}", tool, args),
+                        LogLevel::Info,
+                    );
+                    let response = route_llm_tool(tool, args, command_to_use).await;
+                    nlu::context::add_to_context(
+                        command.to_string(),
+                        response.clone(),
+                        format!("llm_{}", tool),
+                        vec![],
+                    );
+                    return Ok(false);
+                }
             }
         }
     }
@@ -1635,6 +1640,7 @@ fn add_log(message: &str, level: LogLevel) {
 }
 
 /// Route an LLM-discovered tool call to the appropriate command handler.
+#[cfg(feature = "llm")]
 async fn route_llm_tool(tool: &str, _args: &str, command_to_use: &str) -> String {
     match tool {
         "open_app" => {
@@ -1779,6 +1785,7 @@ async fn route_llm_tool(tool: &str, _args: &str, command_to_use: &str) -> String
 }
 
 /// Quick helper to pull the "response" field from a JSON args blob.
+#[cfg(feature = "llm")]
 fn extract_chat_response(args: &str) -> Option<String> {
     let re = regex::Regex::new(r#""response"\s*:\s*"([^"]+)""#).ok()?;
     let caps = re.captures(args)?;
